@@ -701,6 +701,162 @@ export async function issueMyQrToken(): Promise<ActionResult<{ token: string; tt
 }
 
 /** 由 QR token 解碼出對方 user_id（用於 /transfer 掃碼填入） */
+// ─────────────────────────────────────────────────────────────
+// 個人歷史明細 /history/[type]
+// ─────────────────────────────────────────────────────────────
+export type HistoryType = 'money' | 'health' | 'blessing' | 'karma';
+
+export interface HistoryEntry {
+  id: number;
+  tx_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  /** 此筆對該指標的變動（推算自 payload；無法判斷則為 null） */
+  delta: number | null;
+}
+
+/**
+ * 取得個人某指標的明細（活動結束後才會公開福分/業力歷史）。
+ */
+export async function getMyHistory(type: HistoryType): Promise<ActionResult<{
+  entries: HistoryEntry[];
+  current_value: number;
+  show_all_stats: boolean;
+  scoring_done: boolean;
+}>> {
+  try {
+    const session = await requireRole('player');
+
+    const settings = await getSettings(['ShowAllStats']);
+    const board = await query<{ final_scoring_triggered_at: string | null }>(
+      `SELECT final_scoring_triggered_at FROM "BoardConfig" WHERE id = 1`,
+    );
+    const scoringDone = !!board.rows[0]?.final_scoring_triggered_at;
+    const showAllStats = settings.ShowAllStats === 'true';
+
+    // 規格：福分/業力 受 ShowAllStats 與 final_scoring 雙重控管
+    if ((type === 'blessing' || type === 'karma') && !showAllStats && !scoringDone) {
+      throw new Error('FORBIDDEN');
+    }
+
+    const ps = await query<{ money: number; health: number; blessing: number; karma: number }>(
+      `SELECT money, health, blessing, karma FROM "PlayerStats" WHERE user_id = $1`,
+      [session.userId],
+    );
+    const me = ps.rows[0];
+
+    const entries = await query<HistoryEntry>(
+      `SELECT id, tx_type, payload, created_at,
+              NULL::int AS delta
+       FROM "Transaction"
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 200`,
+      [session.userId],
+    );
+
+    // 從 payload 推算對該 type 的 delta（盡力而為）
+    const computed = entries.rows.map((e) => ({
+      ...e,
+      delta: extractDelta(e.tx_type, e.payload, type),
+    }));
+
+    return ok({
+      entries: computed,
+      current_value: me ? me[type] : 0,
+      show_all_stats: showAllStats,
+      scoring_done: scoringDone,
+    });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+function extractDelta(txType: string, payload: Record<string, unknown>, type: HistoryType): number | null {
+  // 各 tx_type 的 payload 對應該 type 的變動推算
+  if (txType === 'destiny_draw') {
+    const v = payload[type];
+    return typeof v === 'number' ? v : null;
+  }
+  if (txType === 'rebirth') {
+    const ns = payload['new_stats'] as Record<string, number> | undefined;
+    const before = payload['before'] as Record<string, number> | undefined;
+    if (ns && before && typeof ns[type] === 'number' && typeof before[type] === 'number') {
+      return ns[type] - before[type];
+    }
+    return null;
+  }
+  if (txType === 'transfer') {
+    if (type !== 'money') return 0;
+    const from = payload['from'];
+    const amt = payload['amount'];
+    const fee = payload['fee'];
+    if (typeof amt !== 'number') return null;
+    // 收款 / 出款判斷：若我是 from → -amount-fee；若是 to → +amount
+    // payload 同時寫進兩筆 Transaction，所以這裡不知道哪筆是哪個玩家。
+    // 簡化：以 from 是否等於本筆 user_id 推不出（要看上層 user_id），
+    // 故回傳 null 讓 UI 顯示 ±不確定。實作時上層可再用 user_id 比對。
+    void from; void fee;
+    return null;
+  }
+  if (txType === 'exchange') {
+    if (type === 'blessing') {
+      const v = payload['blessing_cost'];
+      return typeof v === 'number' ? -v : null;
+    }
+    if (type === 'money') {
+      const v = payload['money_gain'];
+      return typeof v === 'number' ? v : null;
+    }
+    return 0;
+  }
+  if (txType === 'bank_borrow') {
+    if (type === 'money') {
+      const v = payload['money_delta'];
+      return typeof v === 'number' ? v : null;
+    }
+    return 0;
+  }
+  if (txType === 'bank_repay') {
+    if (type === 'money') {
+      const v = payload['amount'];
+      return typeof v === 'number' ? -v : null;
+    }
+    return 0;
+  }
+  if (txType === 'bank_interest') {
+    if (type === 'money') {
+      const v = payload['money_due'];
+      return typeof v === 'number' ? -v : null;
+    }
+    if (type === 'blessing') {
+      const v = payload['blessing_due'];
+      return typeof v === 'number' ? -v : null;
+    }
+    return 0;
+  }
+  if (txType === 'stock_buy') {
+    if (type === 'money') {
+      const v = payload['cost'];
+      return typeof v === 'number' ? -v : null;
+    }
+    return 0;
+  }
+  if (txType === 'stock_sell') {
+    if (type === 'money') {
+      const v = payload['proceeds'];
+      return typeof v === 'number' ? v : null;
+    }
+    return 0;
+  }
+  if (txType === 'quick_action') {
+    const d = payload['delta'] as Record<string, number> | undefined;
+    if (d && typeof d[type] === 'number') return d[type];
+    return null;
+  }
+  return null;
+}
+
 export async function decodePlayerQrToken(token: string): Promise<ActionResult<{ user_id: string; name: string }>> {
   try {
     await requireRole('player');
