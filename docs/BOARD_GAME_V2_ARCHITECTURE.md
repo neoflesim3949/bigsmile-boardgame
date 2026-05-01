@@ -281,6 +281,27 @@
 | `updated_at` | TIMESTAMPTZ | |
 | **PK** | | (`user_id`, `stock_id`) |
 
+#### `StockRoundScript` — 股市大盤回合腳本
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `round` | INTEGER | 回合編號 |
+| `stock_id` | UUID FK→Stock | |
+| `change_type` | TEXT CHECK IN (`'percent'`, `'fixed'`) | `percent` = 百分比漲跌（值為 ±N 代表 ±N%）；`fixed` = 直接設定為絕對價格 |
+| `change_value` | INTEGER | 漲跌幅或絕對價格（依 type 解讀） |
+| `updated_at` | TIMESTAMPTZ | |
+| **PK** | | (`round`, `stock_id`) |
+
+> 管理員在 `/admin/stocks` 的「股市大盤回合腳本總表」設定。`tickRound` 推進回合時：若該回合在此表有 row → 套用腳本；否則 fallback 為 `AppSettings.StockPriceRule` 隨機規則（預設 ±5%）。
+
+#### `StockRoundEvent` — 該回合的看板跑馬燈文字
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `round` | INTEGER PK | |
+| `event_text` | TEXT | 推進到此回合時自動推到看板的跑馬燈文字 |
+| `updated_at` | TIMESTAMPTZ | |
+
+> `tickRound` 推進至該回合時，若 `event_text` 不為空，自動 UPDATE `BoardConfig.marquee_text` 並設定 `marquee_until = now() + 5 minutes`。
+
 ### 3.4 活動看板相關
 
 #### `Event` — 活動事件（後台預設，輪播於看板底部「事件」列）
@@ -403,16 +424,16 @@
 | 路由 | 角色 | 說明 |
 |------|------|------|
 | `/login` | 全部 | 登入頁 |
-| `/admin` | 管理員 | 大會後台儀表板（排行榜、回合控制、總覽） |
+| `/admin` | 管理員 | 大會後台「總覽面板」。包含：**頂部工具列**（導覽遊戲 toggle / 抽卡模式 toggle / 遊戲開始 / 遊戲結束計分 / 開啟活動看板 link）+ **3 KPI cards**（遊戲已進行時間 / 系統狀態 / 目前回合數）+ **3 控制台**（回合控制 = 推進下一回合按鈕；即時跑馬燈廣播 = textarea + 發送 + 清除；換匯所即時權重控制 = `-50%` `-20%` `0%` `+50%` `+100%` 自訂 6 鈕，套用 `ExchangeRateMultiplier`）+ **財富排行榜** |
 | `/admin/accounts` | 管理員 | 帳號 CRUD（admin / player / captain；列表 + 搜尋）。**player 角色額外提供「重置遊戲狀態」按鈕**（清四項數值、命格、持股、借貸、道具，保留帳號） |
 | `/admin/stations` | 管理員 | 關卡 CRUD（含 `allow_rebirth`、限額） + 關主指派 |
-| `/admin/stocks` | 管理員 | 股市商品列表（≤ 10 檔） |
-| `/admin/stocks/[id]` | 管理員 | 單一股票編輯 + 回合腳本 |
+| `/admin/stocks` | 管理員 | 股市商品列表（≤ 10 檔）+ **股市大盤回合腳本總表**（每回合 × 每檔股票的 % 或 $ 變動 + 事件跑馬燈，推進回合時自動套用） |
+| `/admin/stocks/[id]` | 管理員 | 單一股票歷史價格曲線（read-only；編輯走列表頁 modal） |
 | `/admin/items` | 管理員 | 道具定義 CRUD |
-| `/admin/events` | 管理員 | 後台事件管理 + 跑馬燈發布 |
-| `/admin/board` | 管理員 | 看板版型 / display token / 回合控制面板 |
+| `/admin/events` | 管理員 | 三合一頁：劇情事件排程 CRUD + 看板畫面設定（主標題、重點商品、配色）+ Display Token 管理 |
+| `/admin/board` | (deprecated) | 路由仍存在以避免外連結失效，但功能已併入 `/admin/events`；建議所有看板相關操作走 `/admin/events` |
 | `/admin/finance` | 管理員 | 財務設定（換匯所方案、銀行借貸規則） |
-| `/admin/settings` | 管理員 | 參數設定頁（活動時間、匯率、比分權重、新手參數、重生參數） |
+| `/admin/settings` | 管理員 | 參數設定頁，6 個 section：**數值顯示**（ShowAllStats）、**最終計分權重**（3 weights）、**預設新手初始值**（4 nums）、**重生後初始值**（4 nums）、**新手命格範本池**（CRUD）、**危險操作區**（5 按鈕 × 3 次確認）。**不含活動時間 / 匯率 / 銀行**（這些在別處：活動時間旗標走 `/admin` dashboard 工具列；換匯倍率走 `/admin` 控制台；換匯方案與銀行借貸方案走 `/admin/finance`） |
 | `/captain` | 關主 | 關主後台首頁（巨大掃碼入口 + 快捷模組列表） |
 | `/captain/actions` | 關主 | 快捷模組編輯（建立 / 修改 / 刪除四項參數變動規則） |
 | `/captain/scan` | 關主 | 關主前台掃碼介面（進行列表 + 完成結算 + 重生按鈕） |
@@ -511,17 +532,17 @@ src/app/
 │   ├── actions/page.tsx           # 快捷模組編輯
 │   └── scan/page.tsx              # 關主掃碼前台
 ├── admin/
-│   ├── layout.tsx                 # 後台共用 layout
-│   ├── page.tsx                   # Dashboard（總覽 + 回合控制）
-│   ├── accounts/page.tsx          # 帳號 CRUD（含 player 重置遊戲狀態）
+│   ├── layout.tsx                 # 後台共用 layout（左側 nav）
+│   ├── page.tsx                   # 總覽面板：工具列(5鈕) + 3 KPI + 3 控制台 + 排行榜
+│   ├── accounts/page.tsx          # 帳號 CRUD（含 player 重置遊戲狀態按鈕）
 │   ├── stations/page.tsx          # 關卡 + 關主指派
-│   ├── stocks/page.tsx            # 股票列表
-│   ├── stocks/[id]/page.tsx       # 單檔股票編輯 + 回合腳本
-│   ├── items/page.tsx             # 道具定義
-│   ├── events/page.tsx            # 事件 + 跑馬燈
-│   ├── board/page.tsx             # 看板版型 + display token + 回合控制
-│   ├── finance/page.tsx           # 換匯所方案 + 銀行借貸規則
-│   └── settings/page.tsx          # 全域參數設定
+│   ├── stocks/page.tsx            # 股票列表 + 股市大盤回合腳本總表
+│   ├── stocks/[id]/page.tsx       # 單檔股票歷史價格曲線（read-only）
+│   ├── items/page.tsx             # 道具定義 CRUD
+│   ├── events/page.tsx            # 三合一：事件 CRUD + 看板畫面設定 + display token
+│   ├── board/page.tsx             # (deprecated) 已併入 events，路由保留以避免外連結失效
+│   ├── finance/page.tsx           # 換匯所方案 + 銀行借貸方案
+│   └── settings/page.tsx          # 6 區塊：顯示 / 計分權重 / 新手 / 重生 / 範本池 / 危險區
 ├── display/board/page.tsx         # 活動看板（強制深色，display token 授權）
 └── actions/                       # Server Actions（player.ts, captain.ts, admin.ts, stock.ts, auth.ts）
 
@@ -593,7 +614,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `updateGameSettings(payload)` | 統一更新參數設定（活動時間、匯率、比分權重、新手參數、重生參數；批次 upsert `AppSettings`） | 無 |
 | `upsertStock(payload)` | 新增/編輯股市商品 | 無 |
 | `setStockPrice(stockId, price)` | 即時手動調整單檔股價（不等回合，自動寫入歷史） | pg tx |
-| `tickRound(overrides?)` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — Tx1 更新 10 檔股價 + `BoardConfig.current_round += 1`；Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（每回合固定金額，不做比例計算）。30 秒 debounce 防誤點 | 兩個 pg tx |
+| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — Tx1 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory` + 若 `StockRoundEvent` 有此回合文字則 UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min` + `BoardConfig.current_round += 1`；Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（每回合固定金額，不做比例計算）。30 秒 debounce 防誤點（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
 | `setStockPriceRule(rule)` | 設定 `AppSettings.StockPriceRule`（下回合用的漲跌規則） | 無 |
 | `resetStockHistory()` | **每場活動開場前手動觸發**：`DELETE FROM "StockHistory"`（清空股價歷史，避免上場活動的曲線殘留到本場）；同時將 `BoardConfig.current_round` 重置為 0；寫一筆 `Transaction`（`tx_type='settings_update'`，payload 註明 reset stock history）；**僅 admin 可執行，前端二次確認** | pg tx |
 | `archiveStockHistory(label)` | （可選）將當前 `StockHistory` 全表搬到 `StockHistoryArchive` 表並打標籤；用於賽後保留稽核資料 | pg tx |
@@ -642,10 +663,12 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 
 | 鍵名 | 型別 | 說明 |
 |------|------|------|
-| `BoardGameEnabled` | `'true'` \| `'false'` | 系統總開關（手動覆蓋活動時間排程） |
+| `BoardGameEnabled` | `'true'` \| `'false'` | 系統總開關（手動覆蓋活動時間排程）。**首次切到 `'true'` 時** server action `setQuickFlag` 會自動寫入 `BoardGameStartedAt = now()`（之後切回 false 再切 true 不會覆寫，保留首次起始時間以計算「遊戲已進行時間」） |
+| `BoardGameStartedAt` | ISO 字串 | 遊戲首次開啟的時間戳。`/admin` 總覽面板顯示「遊戲已進行時間」用 |
 | `EventStartAt` | TIMESTAMPTZ 字串 NULL | 活動預定開始時間（NULL = 不限，依 `BoardGameEnabled`） |
 | `EventEndAt` | TIMESTAMPTZ 字串 NULL | 活動預定結束時間（NULL = 不限，依 `BoardGameEnabled`） |
-| `ExchangeRate` | 數字字串 | 1 福報 = N 金錢 |
+| `ExchangeRate` | 數字字串 | 1 福報 = N 金錢（基準匯率，僅作參考；實際匯兌走 `ExchangeOption` 個別方案） |
+| `ExchangeRateMultiplier` | 數字字串（預設 `'1.0'`） | 全域換匯倍率，套在 `ExchangeOption.money_gain_per_unit` 上：實得金錢 = `units × money_gain_per_unit × multiplier`。`/admin` 總覽面板的「換匯所即時權重控制」即時調整此值（-50% = 0.5、+50% = 1.5、+100% = 2.0…）。範圍 0–10 |
 | `TransferFeeRate` | 數字字串 | 玩家互轉手續費比率（預設 `'0'`） |
 | `ScoreWeightMoney` | 數字字串 | 最終計分：金錢權重（建議 `'0.05'`） |
 | `ScoreWeightBlessing` | 數字字串 | 最終計分：福分權重（建議 `'200'`） |

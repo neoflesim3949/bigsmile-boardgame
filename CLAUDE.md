@@ -143,19 +143,43 @@ assertPlayerAlive(stats)   // ← 統一 guard
 
 ### 參數設定頁（`/admin/settings`）
 
-後台路由 `/admin/settings` 提供統一參數設定頁面，分為以下區塊：
+後台路由 `/admin/settings` 提供 **6 個 section** 的參數設定頁面：
 
-| 區塊 | 涵蓋的 AppSettings key |
-|------|------------------------|
-| 活動時間 | `EventStartAt`、`EventEndAt`（搭配 `BoardGameEnabled` 手動覆蓋） |
-| 全域換匯所匯率 | `ExchangeRate` |
+| 區塊 | 涵蓋的內容 |
+|------|------------|
+| 數值顯示設定 | `ShowAllStats`（單一 toggle，控制玩家是否看見福分／業力。健康／金錢始終可見） |
 | 最終計分權重 | `ScoreWeightMoney`（建議 0.05）、`ScoreWeightBlessing`（建議 200）、`ScoreWeightKarma`（建議 150，扣除）；公式：`金錢×W_m + 福分×W_b − 業力×W_k`，健康不參與計分 |
-| 新手初始值範本 | `InitialValueTemplate` 表 CRUD（多個範本，隨機抽取）；無範本時 fallback `InitialMoney/Health/Blessing/Karma` |
-| 重生參數 | `RebirthMoney`、`RebirthHealth`（最高 100）、`RebirthBlessing`、`RebirthKarma` |
-| 數值顯示與銀行 | `ShowAllStats`（控制健康是否顯示），以及銀行借貸參數（額度、扣息區間、利息） |
+| 預設新手初始值 | `InitialMoney`、`InitialHealth`、`InitialBlessing`、`InitialKarma`（命格範本不可用時的 fallback） |
+| 重生後初始值 | `RebirthMoney`、`RebirthHealth`（最高 100）、`RebirthBlessing`、`RebirthKarma`（與新玩家初始值**分開管理**） |
+| 新手命格範本池 | `InitialValueTemplate` 表 CRUD（多個範本，啟用中隨機抽取） |
+| 危險操作區（Danger Zone） | 5 個按鈕（重置會員明細 / 刪除所有會員 / 重置股價歷史 / 刪除所有股票 / 重置使用次數），**每個按鈕需經過 3 次確認彈窗才會執行** |
 
-重生初始值與新玩家初始值**分開管理**，各自獨立。
-最終計分由管理員按「開始計分」觸發（`triggerFinalScoring`），結果推送至看板與玩家端。
+**這頁不含**：
+- **活動時間 / 遊戲狀態旗標**（`BoardGameEnabled` / `CardDrawMode` / `TourMode`）→ 在 `/admin` 總覽面板的工具列
+- **換匯倍率**（`ExchangeRateMultiplier`）→ 在 `/admin` 總覽面板的「換匯所即時權重控制」
+- **換匯方案 / 銀行借貸方案**（`ExchangeOption` / `BankLoanOption`）→ 在 `/admin/finance`
+- **看板版型 / 跑馬燈 / display token** → 在 `/admin/events`
+
+最終計分由管理員按 `/admin` 工具列的「遊戲結束(計分)」觸發（`triggerFinalScoring`），結果推送至看板與玩家端。
+
+### 總覽面板（`/admin`）
+
+`/admin` 是管理員的核心儀表板，**唯一**控制遊戲整體節奏的地方。三大功能群：
+
+**A. 頂部工具列（5 鈕）**
+- 「導覽遊戲」toggle → `setQuickFlag('TourMode', bool)`
+- 「抽卡模式」toggle → `setQuickFlag('CardDrawMode', bool)`
+- 「遊戲開始」按鈕 → `setQuickFlag('BoardGameEnabled', true)`；**前置條件**：上面兩個 toggle 都要先開
+- 「遊戲結束(計分)」按鈕 → `triggerFinalScoring()`（不可復原）
+- 「開啟活動看板」link → `/admin/events`（去發 display token）
+
+**B. 3 控制台**
+- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（兩 tx + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）
+- **即時跑馬燈廣播**：textarea + 發送 / 清除 → `publishMarquee` / `clearMarquee`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
+- **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上
+
+**C. 排行榜（前 50 名）**
+即時依 `ScoreWeight*` 計算 `final_score = money×W_m + blessing×W_b − karma×W_k`。**計算在 JS 端做**（避免 PG 對 `int * float-text-param` 的 cast 推導失敗）。
 
 ---
 
@@ -193,11 +217,14 @@ assertPlayerAlive(stats)   // ← 統一 guard
 app/
 ├── (auth)/login/
 ├── admin/
-│   ├── page.tsx                # 管理員 Dashboard
-│   ├── finance/
-│   │   └── page.tsx            # 財務設定頁（換匯所方案 + 銀行借貸規則）
-│   └── settings/
-│       └── page.tsx            # 參數設定頁（活動時間、匯率、比分權重、新手參數、重生參數）
+│   ├── page.tsx                # 總覽面板（工具列 5 鈕 + 3 KPI + 3 控制台 + 排行榜）
+│   ├── accounts/page.tsx       # 帳號 CRUD（含 player 重置遊戲狀態）
+│   ├── stations/page.tsx       # 關卡 + 關主指派
+│   ├── stocks/page.tsx         # 股票列表 + 股市大盤回合腳本總表
+│   ├── items/page.tsx          # 道具定義 CRUD
+│   ├── events/page.tsx         # 三合一：事件 + 看板畫面設定 + display token
+│   ├── finance/page.tsx        # 換匯所方案 + 銀行借貸方案
+│   └── settings/page.tsx       # 6 區塊：顯示/計分/新手/重生/範本池/危險區
 ├── captain/
 │   ├── page.tsx                # 關主後台（快捷模組設定）
 │   └── scan/page.tsx           # 關主前台掃碼（進行列表 + 完成結算 + 重生按鈕）
