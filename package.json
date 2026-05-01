@@ -1,0 +1,45 @@
+{
+  "name": "board-game-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:seed:prod": "tsx scripts/seed-prod.ts",
+    "db:reset": "docker compose down -v && docker compose up -d postgres && sleep 3 && npm run db:migrate && npm run db:seed"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "clsx": "^2.1.1",
+    "jose": "^6.2.3",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.14.0",
+    "next": "16.2.4",
+    "pg": "^8.20.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tailwind-merge": "^3.5.0",
+    "zod": "^4.4.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

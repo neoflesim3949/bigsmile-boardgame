@@ -1,0 +1,278 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter);
+  --color-zinc-950: #09090b;
+  --color-zinc-900: #18181b;
+  --color-zinc-800: #27272a;
+  --color-amber-500: #f59e0b;
+  --color-amber-400: #fbbf24;
+  --color-rose-500: #f43f5e;
+  --color-emerald-500: #10b981;
+
+  --animate-marquee-vertical: marquee-vertical 20s linear infinite;
+  --animate-fade-in: fade-in 0.6s ease forwards;
+
+  @keyframes marquee-vertical {
+    0% {
+      transform: translateY(0);
+    }
+
+    100% {
+      transform: translateY(-50%);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* ─── 主題 CSS 變數 ─────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  --bg-base: #09090b;
+  /* zinc-950 */
+  --bg-surface: #18181b;
+  /* zinc-900 */
+  --bg-elevated: #27272a;
+  /* zinc-800 */
+  --border-color: #3f3f46;
+  /* zinc-700 */
+  --text-primary: #f4f4f5;
+  /* zinc-100 */
+  --text-muted: #71717a;
+  /* zinc-500 */
+  --panel-bg: rgba(24, 24, 27, 0.6);
+  --panel-border: #27272a;
+}
+
+[data-theme="light"] {
+  --bg-base: #fafafa;
+  /* zinc-50  */
+  --bg-surface: #ffffff;
+  /* white    */
+  --bg-elevated: #f4f4f5;
+  /* zinc-100 */
+  --border-color: #e4e4e7;
+  /* zinc-200 */
+  --text-primary: #18181b;
+  /* zinc-900 */
+  --text-muted: #a1a1aa;
+  /* zinc-400 */
+  --panel-bg: rgba(255, 255, 255, 0.7);
+  --panel-border: #e4e4e7;
+}
+
+/* ─── 語意工具類別（前台頁面通用）─────────────────────────────── */
+@layer utilities {
+
+  /* 背景 */
+  .page-bg {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+  }
+
+  .surface {
+    background-color: var(--bg-surface);
+  }
+
+  .elevated {
+    background-color: var(--bg-elevated);
+  }
+
+  /* 邊框 */
+  .border-theme {
+    border-color: var(--border-color);
+  }
+
+  /* 文字 */
+  .text-primary {
+    color: var(--text-primary);
+  }
+
+  .text-muted {
+    color: var(--text-muted);
+  }
+
+  /* 面板（取代固定 zinc 色的 glass-panel） */
+  .panel {
+    background-color: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+  }
+
+  /* 原有深色專用 glass-panel（管理後台維持原樣）*/
+  .glass-panel {
+    @apply bg-zinc-900/60 backdrop-blur-md border border-zinc-800 shadow-xl;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 15px rgba(251, 191, 36, 0.4);
+  }
+
+  /* 隱藏滾動條但保持可滾動 */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* 自定義捲軸（深色） */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+    border-radius: 3px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #52525b;
+  }
+}
+
+html {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  /* body 設為 transparent，避免與 .page-bg 雙層疊色造成接縫 */
+  background: transparent;
+  color: inherit;
+}
+
+/* ─── 淺色主題全域覆蓋 ─────────────────────────────────────────
+   策略：用 [data-theme="light"] 下的「類別選擇器」直接覆蓋 Tailwind。
+   注意：Tailwind v4 的半透明類別（/60, /80）在 CSS 選擇器中需用逃脫字元，
+   因此改用屬性選擇器或直接對元素設定 CSS 變數來繞開。
+────────────────────────────────────────────────────────────── */
+
+/* 對 <html> 設定好主題後，利用 CSS 自定義屬性讓所有子元素繼承 */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* ── 玻璃面板 ── */
+  .glass-panel,
+  .panel {
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    border-color: #e4e4e7 !important;
+    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.07) !important;
+    backdrop-filter: blur(12px);
+  }
+
+  /* ── 純背景色（無透明度）── */
+  .bg-zinc-950 { background-color: #f8f8f8 !important; }
+  .bg-zinc-900 { background-color: #ffffff !important; }
+  .bg-zinc-800 { background-color: #f0f0f1 !important; }
+  .bg-zinc-700 { background-color: #e4e4e7 !important; }
+
+  /* ── 帶透明度的版本（Tailwind v4 會生成 .bg-zinc-XXX\/YY 字面 class）──
+     必須 escape 斜線；否則整片頁面會在淺色模式留下深色 ── */
+  .bg-zinc-950\/80 { background-color: rgba(248, 248, 248, 0.92) !important; }
+  .bg-zinc-950\/60 { background-color: rgba(248, 248, 248, 0.85) !important; }
+
+  .bg-zinc-900\/80 { background-color: rgba(255, 255, 255, 0.92) !important; }
+  .bg-zinc-900\/60 { background-color: rgba(255, 255, 255, 0.85) !important; }
+  .bg-zinc-900\/50 { background-color: rgba(255, 255, 255, 0.80) !important; }
+  .bg-zinc-900\/40 { background-color: rgba(255, 255, 255, 0.70) !important; }
+
+  .bg-zinc-800\/80 { background-color: rgba(240, 240, 241, 0.92) !important; }
+  .bg-zinc-800\/60 { background-color: rgba(240, 240, 241, 0.85) !important; }
+
+  .bg-zinc-700\/80 { background-color: rgba(228, 228, 231, 0.92) !important; }
+  .bg-zinc-700\/60 { background-color: rgba(228, 228, 231, 0.85) !important; }
+
+  /* ── 文字色 ── */
+  .text-zinc-100 {
+    color: #18181b !important;
+  }
+
+  .text-zinc-200 {
+    color: #27272a !important;
+  }
+
+  .text-zinc-300 {
+    color: #3f3f46 !important;
+  }
+
+  .text-zinc-400 {
+    color: #52525b !important;
+  }
+
+  .text-zinc-500 {
+    color: #71717a !important;
+  }
+
+  .text-zinc-600 {
+    color: #a1a1aa !important;
+  }
+
+  /* ── 邊框色 ── */
+  .border-zinc-900 {
+    border-color: #e4e4e7 !important;
+  }
+
+  .border-zinc-800 {
+    border-color: #e4e4e7 !important;
+  }
+
+  .border-zinc-700 {
+    border-color: #d4d4d8 !important;
+  }
+
+  /* ── 強調色文字（淺色底需要更深的版本以維持對比）── */
+  .text-amber-400   { color: #d97706 !important; } /* amber-600 */
+  .text-amber-300   { color: #b45309 !important; } /* amber-700 */
+  .text-teal-400    { color: #0f766e !important; } /* teal-700  */
+  .text-teal-300    { color: #0d9488 !important; } /* teal-600  */
+  .text-emerald-500 { color: #047857 !important; } /* emerald-700 */
+  .text-emerald-400 { color: #059669 !important; } /* emerald-600 */
+  .text-emerald-300 { color: #10b981 !important; } /* emerald-500 */
+  .text-rose-400    { color: #e11d48 !important; } /* rose-600  */
+  .text-rose-300    { color: #be123c !important; } /* rose-700  */
+  .text-blue-400    { color: #2563eb !important; } /* blue-600  */
+
+  /* ── 輸入框 ── */
+  input:not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-emerald"]),
+  textarea,
+  select {
+    background-color: #f4f4f5 !important;
+    border-color: #d4d4d8 !important;
+    color: #18181b !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #a1a1aa !important;
+  }
+
+  /* sticky header 背景：只套到顯式標記 .sticky-header 的元素，不再貪心覆蓋全站 backdrop-blur-md */
+  .sticky-header.backdrop-blur-md {
+    background-color: rgba(255, 255, 255, 0.9) !important;
+  }
+}
