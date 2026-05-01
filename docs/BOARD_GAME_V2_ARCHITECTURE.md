@@ -330,7 +330,61 @@
 
 > 所有寫入操作皆需 INSERT 一筆，作為稽核與排行榜計算依據。
 
-### 3.6 系統設定
+### 3.6 財務方案與借貸
+
+#### `ExchangeOption` — 換匯所方案（後台 CRUD）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | UUID PK | |
+| `label` | TEXT | 方案名稱（後台識別用） |
+| `blessing_cost_per_unit` | INTEGER `> 0` | 每單位消耗多少福報 |
+| `money_gain_per_unit` | INTEGER `> 0` | 每單位獲得多少金錢 |
+| `display_order` | INTEGER | 玩家頁排序權重（小→上） |
+| `is_active` | BOOLEAN | 是否啟用 |
+| `created_at` | TIMESTAMPTZ | |
+
+> 玩家輸入「兌換單位數 N」→ 後端扣 `N × blessing_cost_per_unit` 福報、加 `N × money_gain_per_unit` 金錢。前台**禁止**顯示 `blessing_cost_per_unit`（CLAUDE.md §6.2）。
+
+#### `BankLoanOption` — 銀行借貸方案
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | UUID PK | |
+| `label` | TEXT | 方案名稱 |
+| `blessing_collateral_per_unit` | INTEGER `> 0` | 每單位抵押多少福報 |
+| `money_per_unit` | INTEGER `> 0` | 每單位可借入多少金錢 |
+| `interest_money_per_round` | INTEGER `≥ 0` | 每回合每單位扣的金錢利息 |
+| `interest_blessing_per_round` | INTEGER `≥ 0` | 每回合每單位扣的福分（後台靜默扣，前台不顯示） |
+| `display_order` | INTEGER | 玩家頁排序權重 |
+| `is_active` | BOOLEAN | 是否啟用 |
+| `created_at` | TIMESTAMPTZ | |
+
+#### `PlayerLoan` — 玩家當前借貸（多方案）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `user_id` | TEXT FK→Account | |
+| `loan_option_id` | UUID FK→BankLoanOption | |
+| `units` | INTEGER `≥ 0` | 借入單位數 |
+| `borrowed_at` | TIMESTAMPTZ | 首次借的時間 |
+| `updated_at` | TIMESTAMPTZ | |
+| **PK** | | (`user_id`, `loan_option_id`) |
+
+> 玩家可同時持有多筆不同方案的借款。`PlayerStats.bank_loan` 仍保留為「當前所有借款的金錢餘額總和」cache（每次 borrow / repay / tickRound 結算時同步更新），方便讀取顯示。
+> 額度計算：「此方案最高可借總單位 = `FLOOR(當前福報 / blessing_collateral_per_unit)`；本次可新增單位 = `MAX(0, 最高 - 已持有單位)`」。
+> 重生時 `DELETE FROM PlayerLoan WHERE user_id = $userId`，同步 `PlayerStats.bank_loan = 0` / `loan_updated_at = NULL`。
+
+#### `DisplayToken` — 活動看板存取憑證
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `jti` | TEXT PK | HMAC token 內含的 nonce |
+| `label` | TEXT | 內部識別（哪台螢幕／用途） |
+| `expires_at` | TIMESTAMPTZ | TTL（活動天數 + 1） |
+| `revoked_at` | TIMESTAMPTZ NULL | 撤銷時間（NULL = 仍有效） |
+| `created_by` | TEXT FK→Account NULL | 發行的管理員 |
+| `created_at` | TIMESTAMPTZ | |
+
+> 看板 URL 形如 `/display/board?token=...`。token 為 HMAC-SHA256 簽章（`jti + exp`），`/display/board` server component 驗 token + 比對 `DisplayToken` row 未撤銷即可放行。
+
+### 3.7 系統設定
 
 #### `AppSettings` — 鍵值式全域設定
 | 欄位 | 型別 | 說明 |
