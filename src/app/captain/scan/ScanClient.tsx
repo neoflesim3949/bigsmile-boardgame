@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
+import QrScannerModal from '@/components/QrScannerModal';
 import {
   ArrowLeft, QrCode, X, ListChecks, Skull, Sparkles,
   Wallet, Heart, Scale, AlertCircle, CheckCircle2, RefreshCcw,
@@ -274,7 +275,14 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
         </section>
       )}
 
-      {scanOpen && <QrScanner onClose={() => setScanOpen(false)} onScanned={handleScannedToken} />}
+      {scanOpen && (
+        <QrScannerModal
+          title="掃描玩家 QR"
+          hint="把玩家手機畫面對準框內"
+          onClose={() => setScanOpen(false)}
+          onScanned={handleScannedToken}
+        />
+      )}
 
       {toast && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 ${toast.ok ? 'bg-zinc-900 border-amber-500/40 text-amber-300' : 'bg-rose-950 border-rose-700 text-rose-300'} border px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 text-xs max-w-[90vw] text-center`}>
@@ -299,61 +307,3 @@ function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; va
   );
 }
 
-function QrScanner({ onClose, onScanned }: { onClose: () => void; onScanned: (token: string) => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let qr: { stop: () => Promise<void>; clear: () => void } | null = null;
-    (async () => {
-      try {
-        const { Html5Qrcode } = await import('html5-qrcode');
-        if (!containerRef.current) return;
-        const elemId = 'captain-qr-target';
-        if (!document.getElementById(elemId)) {
-          const div = document.createElement('div');
-          div.id = elemId;
-          div.style.width = '100%';
-          containerRef.current.appendChild(div);
-        }
-        const scanner = new Html5Qrcode(elemId);
-        qr = scanner;
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: 280 },
-          (decoded) => {
-            onScanned(decoded);
-            scanner.stop().then(() => scanner.clear()).catch(() => {});
-          },
-          () => {},
-        );
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : '無法啟動相機');
-      }
-    })();
-    return () => {
-      if (qr) qr.stop().then(() => qr!.clear()).catch(() => {});
-    };
-  }, [onScanned]);
-
-  return (
-    <div className="fixed inset-0 z-50 bg-zinc-950 p-4 flex flex-col" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 max-w-md w-full mx-auto relative" onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-3 right-3 w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
-          <X className="w-4 h-4" />
-        </button>
-        <h3 className="text-lg font-bold text-zinc-100 mb-3 text-center flex items-center justify-center gap-2">
-          <QrCode className="w-5 h-5" /> 掃描玩家 QR
-        </h3>
-        <div ref={containerRef} className="bg-black rounded-lg overflow-hidden min-h-[280px]" />
-        {err && (
-          <div className="mt-3 bg-rose-950 border border-rose-700 text-rose-300 rounded-lg p-3 text-sm flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-            <span>{err}</span>
-          </div>
-        )}
-        <p className="text-xs text-zinc-500 text-center mt-3">把玩家手機畫面對準框內</p>
-      </div>
-    </div>
-  );
-}

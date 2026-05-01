@@ -1369,6 +1369,100 @@ export async function triggerFinalScoring(): Promise<ActionResult<{ triggered_at
   }
 }
 
+/**
+ * 重啟遊戲場次（核重置）— 把整場活動狀態歸零，準備下一場。
+ *
+ * **清空**：
+ * - 玩家四項數值 / 命格 / 重生計數 / 借款餘額 / 手動刷新節流戳
+ * - StockHolding（持股）
+ * - PlayerLoan（借貸）
+ * - PlayerItem（道具）
+ * - StockHistory（股價歷史曲線）
+ * - StockRoundScript / StockRoundEvent（股市回合腳本）
+ * - StationUsage / QuickActionUsage（使用次數紀錄）
+ * - Station.global_use_count = 0、QuickAction.global_use_count = 0
+ * - BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at）
+ *
+ * **回到起始狀態**：
+ * - Event.is_active = false（事件保留定義，但全部停用，下一場再選擇要啟用哪些）
+ * - AppSettings.BoardGameEnabled = 'false'
+ * - AppSettings.BoardGameStartedAt = ''
+ *
+ * **保留**：
+ * - Account（帳號）
+ * - Stock 商品定義（current_price 保留，作為新場起始價）
+ * - Item / Station / QuickAction / InitialValueTemplate 定義
+ * - ExchangeOption / BankLoanOption 方案
+ * - Transaction 稽核紀錄（不刪歷史）
+ *
+ * **不可復原**。前端應有 5 次確認彈窗。
+ */
+export async function restartGameCycle(): Promise<ActionResult<{ reset_at: string }>> {
+  try {
+    const session = await requireRole('admin');
+    const r = await withTx(async (client) => {
+      // 1. 玩家狀態歸零
+      await client.query(
+        `UPDATE "PlayerStats"
+         SET destiny_name = NULL, money = 0, health = 0, blessing = 0, karma = 0,
+             rebirth_count = 0, bank_loan = 0, loan_updated_at = NULL,
+             last_manual_refresh_at = NULL, updated_at = now()`,
+      );
+      // 2. 持股 / 借貸 / 道具
+      await client.query(`DELETE FROM "StockHolding"`);
+      await client.query(`DELETE FROM "PlayerLoan"`);
+      await client.query(`DELETE FROM "PlayerItem"`);
+      // 3. 股票歷史 + 回合腳本
+      await client.query(`DELETE FROM "StockHistory"`);
+      await client.query(`DELETE FROM "StockRoundScript"`);
+      await client.query(`DELETE FROM "StockRoundEvent"`);
+      // 4. 使用次數 / 計數歸零
+      await client.query(`UPDATE "Station" SET global_use_count = 0`);
+      await client.query(`UPDATE "QuickAction" SET global_use_count = 0`);
+      await client.query(`DELETE FROM "StationUsage"`);
+      await client.query(`DELETE FROM "QuickActionUsage"`);
+      // 5. 事件回到「未啟用」起始
+      await client.query(`UPDATE "Event" SET is_active = false`);
+      // 6. BoardConfig 場次狀態
+      const upd = await client.query<{ updated_at: string }>(
+        `UPDATE "BoardConfig"
+         SET final_scoring_triggered_at = NULL,
+             current_round = 0,
+             last_tick_at = NULL,
+             marquee_text = '',
+             marquee_until = NULL,
+             featured_stock_ids = '{}',
+             updated_at = now()
+         WHERE id = 1
+         RETURNING updated_at`,
+      );
+      if (upd.rows.length === 0) throw new ActionError('NOT_FOUND', 'BoardConfig 不存在');
+      // 7. 寫稽核
+      await client.query(
+        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+         VALUES ($1, $1, 'danger_zone_reset', $2)`,
+        [session.userId, JSON.stringify({ op: 'restart_game_cycle' })],
+      );
+      return upd.rows[0].updated_at;
+    });
+    // 8. AppSettings 旗標（走 setSetting 留稽核）
+    await setSetting('BoardGameEnabled', 'false', session.userId);
+    await setSetting('BoardGameStartedAt', '', session.userId);
+    await setSetting('CardDrawMode', 'false', session.userId);
+    await setSetting('TourMode', 'false', session.userId);
+
+    revalidatePath('/admin');
+    revalidatePath('/admin/events');
+    revalidatePath('/admin/stocks');
+    revalidatePath('/admin/accounts');
+    revalidatePath('/display/board');
+    revalidatePath('/');
+    return ok({ reset_at: r });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 export async function resetSinglePlayer(userId: string): Promise<ActionResult<null>> {
   try {
     const session = await requireRole('admin');

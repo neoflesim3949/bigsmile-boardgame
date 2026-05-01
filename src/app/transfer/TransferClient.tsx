@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition, useEffect, useRef } from 'react';
+import { useState, useTransition } from 'react';
 import { ArrowLeft, Send, CheckCircle2, AlertCircle, QrCode, Search, X } from 'lucide-react';
 import { lookupPlayerById, decodePlayerQrToken, transferMoney } from '@/app/actions/player';
+import QrScannerModal from '@/components/QrScannerModal';
 
 interface Props {
   myMoney: number;
@@ -185,62 +186,14 @@ export default function TransferClient({ myMoney, isDead, gameEnabled, finalScor
         </div>
       )}
 
-      {scanOpen && <QrScanModal onClose={() => setScanOpen(false)} onScanned={handleQrScanned} />}
-    </div>
-  );
-}
-
-function QrScanModal({ onClose, onScanned }: { onClose: () => void; onScanned: (token: string) => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let scanner: { stop: () => Promise<void>; clear: () => void } | null = null;
-    (async () => {
-      try {
-        const { Html5Qrcode } = await import('html5-qrcode');
-        if (!containerRef.current) return;
-        const elemId = 'qr-scan-target';
-        if (!document.getElementById(elemId)) {
-          const div = document.createElement('div');
-          div.id = elemId;
-          div.style.width = '100%';
-          containerRef.current.appendChild(div);
-        }
-        const qr = new Html5Qrcode(elemId);
-        scanner = qr;
-        await qr.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: 250 },
-          (decoded) => {
-            onScanned(decoded);
-            qr.stop().then(() => qr.clear()).catch(() => {});
-          },
-          () => { /* ignore non-decoded frames */ },
-        );
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : '無法啟動相機';
-        setErr(msg);
-      }
-    })();
-    return () => {
-      if (scanner) {
-        scanner.stop().then(() => scanner!.clear()).catch(() => {});
-      }
-    };
-  }, [onScanned]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/90 p-4" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 max-w-sm w-full relative" onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-3 right-3 w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
-          <X className="w-4 h-4" />
-        </button>
-        <h3 className="text-lg font-bold text-zinc-100 mb-3 text-center">掃描對方 QR Code</h3>
-        <div ref={containerRef} className="bg-black rounded-lg overflow-hidden min-h-[250px]" />
-        {err && <p className="text-rose-400 text-sm mt-3 text-center">{err}</p>}
-        <p className="text-xs text-zinc-500 text-center mt-3">把對方手機畫面對準框內</p>
-      </div>
+      {scanOpen && (
+        <QrScannerModal
+          title="掃描對方 QR Code"
+          hint="把對方手機畫面對準框內"
+          onClose={() => setScanOpen(false)}
+          onScanned={handleQrScanned}
+        />
+      )}
     </div>
   );
 }

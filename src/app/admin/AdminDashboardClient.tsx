@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { useState, useTransition, useEffect } from 'react';
 import {
   Users, MonitorPlay, ArrowUpDown, Eye, Sparkles, CheckCircle2, Lock,
-  AlertCircle, RefreshCw,
+  AlertCircle, RefreshCw, AlertTriangle, X,
 } from 'lucide-react';
 import {
   setQuickFlag,
   setExchangeRateMultiplier,
   triggerFinalScoring,
+  restartGameCycle,
   getAdminDashboard,
   publishMarquee,
   clearMarquee,
@@ -82,6 +83,19 @@ export default function AdminDashboardClient({ initial }: Props) {
         showToast(true, '終局結算已觸發');
       } else showToast(false, r.error?.message ?? '');
     });
+  }
+
+  const [restartModalOpen, setRestartModalOpen] = useState(false);
+
+  async function performRestart() {
+    const r = await restartGameCycle();
+    if (r.ok) {
+      await reload();
+      showToast(true, '已重啟新一場（請重新按「遊戲開始」）');
+    } else {
+      showToast(false, r.error?.message ?? '重啟失敗');
+      throw new Error(r.error?.message ?? 'failed');
+    }
   }
 
   function handleTick() {
@@ -206,9 +220,14 @@ export default function AdminDashboardClient({ initial }: Props) {
           )}
 
           {data.scoring.enabled ? (
-            <span className="bg-rose-950 text-rose-400 border border-rose-700 px-4 py-2 rounded-lg text-sm font-bold">
-              已計分
-            </span>
+            <button
+              onClick={() => setRestartModalOpen(true)}
+              disabled={busy}
+              className="bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-700 hover:border-rose-500 px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 min-h-[40px]"
+              title="重啟新一場（會清空所有玩家狀態）"
+            >
+              <RefreshCw className="w-4 h-4" /> 重啟新一場
+            </button>
           ) : (
             <button
               onClick={handleTriggerScoring}
@@ -436,6 +455,117 @@ export default function AdminDashboardClient({ initial }: Props) {
           <span className="text-sm">{toast.msg}</span>
         </div>
       )}
+
+      {restartModalOpen && (
+        <RestartConfirmModal
+          onClose={() => setRestartModalOpen(false)}
+          onConfirmed={async () => {
+            await performRestart();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+const RESTART_STEPS = [
+  '你即將重啟新一場 — 確定要繼續嗎？',
+  '此操作會清空所有玩家狀態與遊戲進度，無法復原。',
+  '清空項目：玩家四項數值、命格、持股、借貸、道具、股票歷史、回合腳本、使用次數。',
+  '帳號、商品定義、道具定義、關卡、財務方案、命格範本將被保留。',
+  '最後確認 — 真的要核重置這場？沒有後悔藥。',
+];
+
+function RestartConfirmModal({
+  onClose, onConfirmed,
+}: {
+  onClose: () => void;
+  onConfirmed: () => Promise<void>;
+}) {
+  const [step, setStep] = useState(0);
+  const [busy, busyTransition] = useTransition();
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function handleNext() {
+    if (step < RESTART_STEPS.length - 1) {
+      setStep((s) => s + 1);
+      return;
+    }
+    busyTransition(async () => {
+      try {
+        await onConfirmed();
+        setDone(true);
+        setTimeout(onClose, 1500);
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : '執行失敗');
+      }
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-rose-900/60 rounded-2xl shadow-[0_0_40px_rgba(225,29,72,0.25)] p-8 max-w-md w-full relative">
+        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300">
+          <X className="w-4 h-4" />
+        </button>
+        {done ? (
+          <div className="text-center py-4">
+            <div className="text-3xl mb-3">✅</div>
+            <p className="text-emerald-400 font-bold text-lg">已重啟新一場</p>
+            <p className="text-zinc-500 text-sm mt-2">請重新按「遊戲開始」啟動</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="w-7 h-7 text-rose-500 shrink-0" />
+              <div>
+                <h4 className="font-bold text-rose-400 text-base">重啟新一場（核重置）</h4>
+                <p className="text-xs text-zinc-500 mt-0.5">需經 5 次確認才會執行</p>
+              </div>
+            </div>
+
+            {/* 5 step indicators */}
+            <div className="flex gap-2 mb-5">
+              {RESTART_STEPS.map((_, i) => (
+                <div
+                  key={i}
+                  className={`flex-1 h-1.5 rounded-full transition-all ${
+                    i <= step ? 'bg-rose-500' : 'bg-zinc-800'
+                  }`}
+                />
+              ))}
+            </div>
+
+            <p className="text-zinc-200 text-sm mb-6 text-center leading-relaxed min-h-[3em]">
+              {RESTART_STEPS[step]}
+            </p>
+
+            {err && <p className="text-rose-400 text-sm mb-3 text-center">{err}</p>}
+
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                disabled={busy}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg text-sm font-bold border border-zinc-700 disabled:opacity-50 min-h-[44px]"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={busy}
+                className="flex-1 bg-rose-600 hover:bg-rose-500 disabled:opacity-60 text-white py-2 rounded-lg text-sm font-bold min-h-[44px]"
+              >
+                {busy
+                  ? '執行中…'
+                  : step < RESTART_STEPS.length - 1
+                    ? `確認 ${step + 1}/5`
+                    : '🔥 最終確認，核重置'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

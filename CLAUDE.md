@@ -170,7 +170,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - 「導覽遊戲」toggle → `setQuickFlag('TourMode', bool)`
 - 「抽卡模式」toggle → `setQuickFlag('CardDrawMode', bool)`
 - 「遊戲開始」按鈕 → `setQuickFlag('BoardGameEnabled', true)`；**前置條件**：上面兩個 toggle 都要先開
-- 「遊戲結束(計分)」按鈕 → `triggerFinalScoring()`（不可復原）
+- 「遊戲結束(計分)」按鈕 → `triggerFinalScoring()`（鎖定玩家寫入、看板切排行榜）。**已計分後此按鈕變成「重啟新一場」** → `restartGameCycle()`：核重置（清玩家狀態 / 持股 / 借貸 / 道具 / 股票歷史 / 回合腳本 / 使用次數 / 看板場次狀態，並把事件全部停用、旗標歸零；保留帳號與商品 / 道具 / 關卡 / 方案定義），**前端強制 5 次確認彈窗**
 - 「開啟活動看板」link → `/admin/events`（去發 display token）
 
 **B. 3 控制台**
