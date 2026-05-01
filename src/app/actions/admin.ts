@@ -385,47 +385,6 @@ export async function deleteAccount(userId: string): Promise<ActionResult<null>>
 }
 
 // ─────────────────────────────────────────────────────────────
-// 玩家總覽（/admin/players）
-// ─────────────────────────────────────────────────────────────
-export interface PlayerOverviewRow {
-  user_id: string;
-  name: string;
-  login_id: string | null;
-  is_active: boolean;
-  destiny_name: string | null;
-  money: number;
-  health: number;
-  blessing: number;
-  karma: number;
-  rebirth_count: number;
-  bank_loan: number;
-  holdings_count: number;
-  items_count: number;
-}
-
-export async function listPlayersOverview(): Promise<ActionResult<PlayerOverviewRow[]>> {
-  try {
-    await requireRole('admin');
-    const r = await query<PlayerOverviewRow>(
-      `SELECT a.user_id, a.name, a.login_id, a.is_active,
-              ps.destiny_name, ps.money, ps.health, ps.blessing, ps.karma,
-              ps.rebirth_count, ps.bank_loan,
-              COALESCE(h.cnt, 0)::int AS holdings_count,
-              COALESCE(it.cnt, 0)::int AS items_count
-       FROM "Account" a
-       LEFT JOIN "PlayerStats" ps ON ps.user_id = a.user_id
-       LEFT JOIN (SELECT user_id, COUNT(*) AS cnt FROM "StockHolding" GROUP BY user_id) h ON h.user_id = a.user_id
-       LEFT JOIN (SELECT user_id, COUNT(*) AS cnt FROM "PlayerItem" GROUP BY user_id) it ON it.user_id = a.user_id
-       WHERE a.role = 'player'
-       ORDER BY a.created_at DESC`,
-    );
-    return ok(r.rows);
-  } catch (err) {
-    return fail(err);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
 // Station CRUD
 // ─────────────────────────────────────────────────────────────
 const stationSchema = z.object({
@@ -1233,7 +1192,8 @@ export async function resetSinglePlayer(userId: string): Promise<ActionResult<nu
         [userId, session.userId, JSON.stringify({ op: 'reset_single' })],
       );
     });
-    revalidatePath('/admin/players');
+    revalidatePath('/admin/accounts');
+    revalidatePath('/admin');
     return ok(null);
   } catch (err) {
     return fail(err);

@@ -404,8 +404,7 @@
 |------|------|------|
 | `/login` | 全部 | 登入頁 |
 | `/admin` | 管理員 | 大會後台儀表板（排行榜、回合控制、總覽） |
-| `/admin/accounts` | 管理員 | 帳號 CRUD（admin / player / captain；列表 + 搜尋 + 批次匯入） |
-| `/admin/players` | 管理員 | 玩家四項參數總覽 / 重設 / 清空持股道具 |
+| `/admin/accounts` | 管理員 | 帳號 CRUD（admin / player / captain；列表 + 搜尋）。**player 角色額外提供「重置遊戲狀態」按鈕**（清四項數值、命格、持股、借貸、道具，保留帳號） |
 | `/admin/stations` | 管理員 | 關卡 CRUD（含 `allow_rebirth`、限額） + 關主指派 |
 | `/admin/stocks` | 管理員 | 股市商品列表（≤ 10 檔） |
 | `/admin/stocks/[id]` | 管理員 | 單一股票編輯 + 回合腳本 |
@@ -514,8 +513,7 @@ src/app/
 ├── admin/
 │   ├── layout.tsx                 # 後台共用 layout
 │   ├── page.tsx                   # Dashboard（總覽 + 回合控制）
-│   ├── accounts/page.tsx          # 帳號 CRUD
-│   ├── players/page.tsx           # 玩家四項參數總覽
+│   ├── accounts/page.tsx          # 帳號 CRUD（含 player 重置遊戲狀態）
 │   ├── stations/page.tsx          # 關卡 + 關主指派
 │   ├── stocks/page.tsx            # 股票列表
 │   ├── stocks/[id]/page.tsx       # 單檔股票編輯 + 回合腳本

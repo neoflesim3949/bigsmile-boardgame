@@ -7,8 +7,10 @@ import {
   updateAccount,
   deleteAccount,
   listAccounts,
+  resetSinglePlayer,
   type AccountRow,
 } from '@/app/actions/admin';
+import { RotateCcw } from 'lucide-react';
 import type { Role } from '@/lib/auth';
 
 interface Props {
@@ -143,6 +145,20 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
                       >
                         <KeyRound className="w-4 h-4" />
                       </button>
+                      {row.role === 'player' && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`重置玩家「${row.name}」的遊戲狀態？\n清空：四項參數、命格、持股、借貸、道具\n保留：帳號\n此操作不可復原。`)) return;
+                            const r = await resetSinglePlayer(row.user_id);
+                            if (r.ok) showToast(true, `已重置 ${row.name}`);
+                            else showToast(false, r.error?.message ?? '重置失敗');
+                          }}
+                          className="p-1.5 text-zinc-400 hover:text-purple-400 hover:bg-purple-400/10 rounded transition-colors"
+                          title="重置遊戲狀態（清空數值/持股/借貸/道具）"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setEditing(row)}
                         className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-amber-400/10 rounded transition-colors"

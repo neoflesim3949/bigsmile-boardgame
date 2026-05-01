@@ -99,10 +99,6 @@ export default function AdminDashboardClient({ initial }: Props) {
 
       {/* 後台快速入口 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-        <Link href="/admin/players" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">玩家總覽</div>
-          <div className="text-xs text-zinc-500">數值、持股、道具、重置</div>
-        </Link>
         <Link href="/admin/finance" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
           <div className="text-amber-400 text-sm font-bold">財務方案</div>
           <div className="text-xs text-zinc-500">換匯所 + 銀行借貸</div>
