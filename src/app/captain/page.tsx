@@ -1,64 +1,123 @@
 import Link from 'next/link';
-import { QrCode, Power, Settings2, Plus, Zap } from 'lucide-react';
+import { QrCode, Settings2, Plus, MapPin, AlertCircle } from 'lucide-react';
+import { requireRole } from '@/lib/auth';
+import { listMyStations, listMyQuickActions } from '@/app/actions/captain';
+import { logout } from '@/app/actions/auth';
 
-export default function CaptainPage() {
+export default async function CaptainPage() {
+  const session = await requireRole('captain');
+  const [stations, qaR] = await Promise.all([listMyStations(), listMyQuickActions()]);
+  const myStations = stations.ok ? stations.data! : [];
+  const myQuickActions = qaR.ok ? qaR.data! : [];
+
   return (
-    <div className="min-h-screen bg-zinc-950 p-4 pb-20 max-w-md mx-auto relative border-x border-zinc-900">
-      <header className="flex justify-between items-center mb-8 pt-4">
+    <div className="min-h-screen bg-zinc-950 p-4 pb-12">
+      <header className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-teal-400">關主 01</h1>
-          <p className="text-zinc-500 text-sm">負責站點: 命運大轉盤</p>
+          <h1 className="text-xl font-bold text-zinc-100">{session.name}</h1>
+          <p className="text-zinc-500 text-xs">關主 · {session.userId}</p>
         </div>
-        <button className="w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-rose-500 transition-colors">
-          <Power className="w-5 h-5" />
-        </button>
+        <form action={logout}>
+          <button className="text-zinc-500 hover:text-rose-400 text-xs">登出</button>
+        </form>
       </header>
 
-      {/* Main Action - Scan */}
-      <Link href="/captain/scan" className="group relative block w-full mb-10">
-        <div className="absolute inset-0 bg-teal-500/20 blur-xl group-hover:bg-teal-500/30 transition-colors rounded-[3rem]"></div>
-        <div className="relative glass-panel rounded-[3rem] aspect-square flex flex-col items-center justify-center border-teal-500/30 group-hover:border-teal-500/60 transition-colors shadow-[0_0_30px_rgba(20,184,166,0.1)]">
-          <div className="w-24 h-24 mb-4 rounded-full bg-teal-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-            <QrCode className="w-12 h-12 text-teal-400" />
+      {myStations.length === 0 && (
+        <div className="bg-amber-950/30 border border-amber-900/60 text-amber-300 rounded-xl p-4 mb-4 text-sm flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-bold mb-1">尚未被指派關卡</p>
+            <p className="text-xs">請聯絡大會管理員把你加入某關卡的 captain_user_ids</p>
           </div>
-          <h2 className="text-2xl font-bold text-zinc-100">掃描玩家 QR</h2>
-          <p className="text-zinc-400 mt-2">進入掃描器以發放點數或道具</p>
         </div>
+      )}
+
+      <Link
+        href="/captain/scan"
+        className={`block w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-3xl py-12 mb-6 flex flex-col items-center justify-center gap-3 shadow-[0_0_30px_rgba(245,158,11,0.3)] ${myStations.length === 0 ? 'opacity-40 pointer-events-none' : ''}`}
+      >
+        <QrCode className="w-20 h-20" />
+        <span className="text-2xl font-bold">開始掃碼</span>
       </Link>
 
-      <div className="flex justify-between items-end mb-4">
-        <h3 className="text-lg font-semibold text-zinc-300 flex items-center gap-2">
-          <Zap className="w-5 h-5 text-amber-500" />
-          快捷功能模組
-        </h3>
-        <Link href="/captain/actions" className="text-zinc-400 hover:text-teal-400 flex items-center gap-1 text-sm bg-zinc-800/50 px-3 py-1 rounded-full border border-zinc-800">
-          <Settings2 className="w-4 h-4" /> 管理
-        </Link>
-      </div>
-
-      <div className="space-y-3">
-        {/* Quick Action Card */}
-        <div className="glass-panel p-4 rounded-xl flex items-center justify-between border-l-4 border-l-teal-500">
-          <div>
-            <h4 className="font-semibold text-zinc-100 mb-1">任務通關獎勵</h4>
-            <div className="flex gap-2 text-xs">
-              <span className="text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded">金錢 +50</span>
-              <span className="text-teal-400 bg-teal-400/10 px-2 py-0.5 rounded">福分 +2</span>
+      {/* 我被指派的關卡 */}
+      <section className="mb-6">
+        <h2 className="text-sm font-bold text-zinc-400 mb-2 flex items-center gap-2">
+          <MapPin className="w-4 h-4" /> 我的關卡
+        </h2>
+        <div className="space-y-2">
+          {myStations.map((s) => (
+            <div key={s.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+              <div className="flex justify-between items-start">
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-zinc-100">{s.name}</p>
+                  {s.description && <p className="text-xs text-zinc-500 line-clamp-1">{s.description}</p>}
+                </div>
+                {s.allow_rebirth && <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded">重生鍵</span>}
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">
+                已使用 {s.global_use_count}{s.global_max_uses !== null ? ` / ${s.global_max_uses}` : ''}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
+      </section>
 
-        {/* Quick Action Card */}
-        <div className="glass-panel p-4 rounded-xl flex items-center justify-between border-l-4 border-l-rose-500">
-          <div>
-            <h4 className="font-semibold text-zinc-100 mb-1">任務失敗扣除</h4>
-            <div className="flex gap-2 text-xs">
-              <span className="text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded">健康 -5</span>
-            </div>
-          </div>
+      {/* 我的快捷模組 */}
+      <section className="mb-6">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-sm font-bold text-zinc-400 flex items-center gap-2">
+            <Settings2 className="w-4 h-4" /> 我的快捷模組（{myQuickActions.length}）
+          </h2>
+          <Link
+            href="/captain/actions"
+            className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1 rounded-lg border border-zinc-700 flex items-center gap-1 min-h-[36px]"
+          >
+            <Plus className="w-3 h-3" /> 編輯
+          </Link>
         </div>
-        
-      </div>
+        <div className="space-y-2">
+          {myQuickActions.slice(0, 8).map((qa) => (
+            <div key={qa.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 flex justify-between items-center">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-zinc-100 truncate">{qa.label}</p>
+                <p className="text-xs text-zinc-500">{qa.station_name}</p>
+              </div>
+              <DeltaBadges qa={qa} />
+            </div>
+          ))}
+          {myQuickActions.length === 0 && (
+            <p className="text-zinc-500 text-sm text-center py-6">尚未建立快捷模組</p>
+          )}
+        </div>
+      </section>
     </div>
   );
+}
+
+interface QaSummary {
+  delta_money: number;
+  delta_health: number;
+  delta_blessing: number;
+  delta_karma: number;
+  bound_item_id: string | null;
+}
+
+function DeltaBadges({ qa }: { qa: QaSummary }) {
+  const badges = [
+    qa.delta_money !== 0 && { text: fmt('$', qa.delta_money), cls: 'text-amber-400' },
+    qa.delta_health !== 0 && { text: fmt('❤️', qa.delta_health), cls: 'text-rose-400' },
+    qa.delta_blessing !== 0 && { text: fmt('✨', qa.delta_blessing), cls: 'text-teal-400' },
+    qa.delta_karma !== 0 && { text: fmt('⚖', qa.delta_karma), cls: 'text-purple-400' },
+    qa.bound_item_id && { text: '🎁', cls: 'text-zinc-300' },
+  ].filter(Boolean) as Array<{ text: string; cls: string }>;
+  return (
+    <div className="flex gap-1.5 flex-wrap text-xs flex-shrink-0">
+      {badges.map((b, i) => <span key={i} className={`${b.cls} font-mono`}>{b.text}</span>)}
+    </div>
+  );
+}
+
+function fmt(prefix: string, n: number): string {
+  return `${prefix}${n > 0 ? '+' : ''}${n}`;
 }
