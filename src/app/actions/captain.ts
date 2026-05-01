@@ -214,46 +214,96 @@ export interface ScannedPlayer {
   rebirth_count: number;
 }
 
-export async function lookupPlayerByQR(token: string, stationId: string): Promise<ActionResult<{
+export interface PlayerLookupResult {
   player: ScannedPlayer;
   allow_rebirth: boolean;
   station: CaptainStation;
   my_quick_actions: QuickActionRow[];
-}>> {
+  /** 'qr' = 透過掃碼，'manual' = 關主手動輸入 ID（重生鍵不允許走此路徑） */
+  source: 'qr' | 'manual';
+}
+
+async function buildLookupResult(
+  captainUserId: string,
+  targetUserId: string,
+  stationId: string,
+  source: 'qr' | 'manual',
+): Promise<PlayerLookupResult> {
+  const stationCheck = await assertCaptainOfStation(null, captainUserId, stationId);
+
+  const stationR = await query<CaptainStation>(
+    `SELECT id, name, description, allow_rebirth, player_max_uses, global_max_uses, global_use_count
+     FROM "Station" WHERE id = $1`,
+    [stationId],
+  );
+  const station = stationR.rows[0];
+  if (!station) throw new ActionError('NOT_FOUND', '關卡不存在');
+
+  const playerR = await query<ScannedPlayer>(
+    `SELECT a.user_id, a.name,
+            ps.destiny_name, ps.money, ps.health, ps.blessing, ps.karma, ps.rebirth_count,
+            (ps.health <= 0 OR ps.blessing <= 0) AS is_dead
+     FROM "Account" a
+     JOIN "PlayerStats" ps ON ps.user_id = a.user_id
+     WHERE a.user_id = $1 AND a.role = 'player' AND a.is_active = true`,
+    [targetUserId],
+  );
+  if (playerR.rows.length === 0) throw new ActionError('NOT_FOUND', '玩家不存在或已停用');
+
+  const qaR = await query<QuickActionRow>(
+    `SELECT qa.id, qa.station_id, s.name AS station_name,
+            qa.owner_user_id, qa.label,
+            qa.delta_money, qa.delta_health, qa.delta_blessing, qa.delta_karma,
+            qa.bound_item_id, i.name AS bound_item_name,
+            qa.req_money, qa.req_health, qa.req_blessing, qa.req_karma, qa.req_item_id,
+            qa.player_max_uses, qa.global_max_uses, qa.global_use_count
+     FROM "QuickAction" qa
+     JOIN "Station" s ON s.id = qa.station_id
+     LEFT JOIN "Item" i ON i.id = qa.bound_item_id
+     WHERE qa.owner_user_id = $1 AND qa.station_id = $2
+     ORDER BY qa.created_at ASC`,
+    [captainUserId, stationId],
+  );
+
+  return {
+    player: playerR.rows[0],
+    allow_rebirth: stationCheck.allow_rebirth,
+    station,
+    my_quick_actions: qaR.rows,
+    source,
+  };
+}
+
+export async function lookupPlayerByQR(
+  token: string,
+  stationId: string,
+): Promise<ActionResult<PlayerLookupResult>> {
   try {
     const session = await requireRole('captain');
     const decoded = verifyQrToken(token, 'player');
     if (!decoded) throw new ActionError('INVALID_INPUT', 'QR Code 無效或已過期');
+    return ok(await buildLookupResult(session.userId, decoded.sub, stationId, 'qr'));
+  } catch (err) {
+    return fail(err);
+  }
+}
 
-    // 關主必須屬於該關卡
-    const stationCheck = await assertCaptainOfStation(null, session.userId, stationId);
-
-    const stationR = await query<CaptainStation>(
-      `SELECT id, name, description, allow_rebirth, player_max_uses, global_max_uses, global_use_count
-       FROM "Station" WHERE id = $1`,
-      [stationId],
-    );
-    const station = stationR.rows[0];
-    if (!station) throw new ActionError('NOT_FOUND', '關卡不存在');
-
-    const playerR = await query<ScannedPlayer>(
-      `SELECT a.user_id, a.name,
-              ps.destiny_name, ps.money, ps.health, ps.blessing, ps.karma, ps.rebirth_count,
-              (ps.health <= 0 OR ps.blessing <= 0) AS is_dead
-       FROM "Account" a
-       JOIN "PlayerStats" ps ON ps.user_id = a.user_id
-       WHERE a.user_id = $1 AND a.role = 'player' AND a.is_active = true`,
-      [decoded.sub],
-    );
-    if (playerR.rows.length === 0) throw new ActionError('NOT_FOUND', '玩家不存在或已停用');
-
-    const qa = await listMyQuickActions();
-    return ok({
-      player: playerR.rows[0],
-      allow_rebirth: stationCheck.allow_rebirth,
-      station,
-      my_quick_actions: qa.ok ? qa.data!.filter((x) => x.station_id === stationId) : [],
-    });
+/**
+ * 手動輸入 ID 查找玩家（QR 掃碼失敗時的後備路徑）。
+ * **限制**：不能用於重生 — 重生強制走 QR 掃碼路徑（CLAUDE.md §4 / spec）。
+ * 規則跟 player.ts 的 lookupPlayerById 一樣：≥ 6 碼才查。
+ */
+export async function lookupPlayerByManualId(
+  rawUserId: string,
+  stationId: string,
+): Promise<ActionResult<PlayerLookupResult>> {
+  try {
+    const session = await requireRole('captain');
+    const userId = rawUserId.trim();
+    if (userId.length < 6) {
+      throw new ActionError('INVALID_INPUT', '請輸入完整玩家 ID（≥ 6 碼）');
+    }
+    return ok(await buildLookupResult(session.userId, userId, stationId, 'manual'));
   } catch (err) {
     return fail(err);
   }

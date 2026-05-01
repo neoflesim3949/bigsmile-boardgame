@@ -9,12 +9,14 @@ import {
 } from 'lucide-react';
 import {
   lookupPlayerByQR,
+  lookupPlayerByManualId,
   applyQuickAction,
   rebirthPlayer,
   type CaptainStation,
   type QuickActionRow,
   type ScannedPlayer,
 } from '@/app/actions/captain';
+import { Search } from 'lucide-react';
 
 interface Props {
   stations: CaptainStation[];
@@ -26,8 +28,16 @@ interface InProgressItem {
   player: ScannedPlayer;
   quickAction: QuickActionRow;
   stationId: string;
-  qrToken: string;
+  qrToken: string | null;  // null = 透過手動輸入 ID（不能用於重生）
   addedAt: number;
+}
+
+interface ScannedState {
+  player: ScannedPlayer;
+  qrToken: string | null;
+  allowRebirth: boolean;
+  /** 'qr' = 透過掃碼；'manual' = 透過手動輸入 ID（重生鍵不會出現） */
+  source: 'qr' | 'manual';
 }
 
 export default function ScanClient({ stations, allQuickActions }: Props) {
@@ -36,9 +46,10 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
   const stationQuickActions = allQuickActions.filter((qa) => qa.station_id === stationId);
 
   const [scanOpen, setScanOpen] = useState(false);
-  const [scanned, setScanned] = useState<{ player: ScannedPlayer; qrToken: string; allowRebirth: boolean } | null>(null);
+  const [scanned, setScanned] = useState<ScannedState | null>(null);
   const [inProgress, setInProgress] = useState<InProgressItem[]>([]);
   const [scanErr, setScanErr] = useState<string | null>(null);
+  const [manualId, setManualId] = useState('');
   const [busy, busyTransition] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -57,9 +68,41 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
     busyTransition(async () => {
       const r = await lookupPlayerByQR(token, stationId);
       if (r.ok) {
-        setScanned({ player: r.data!.player, qrToken: token, allowRebirth: r.data!.allow_rebirth });
+        setScanned({
+          player: r.data!.player,
+          qrToken: token,
+          allowRebirth: r.data!.allow_rebirth,
+          source: 'qr',
+        });
       } else {
         setScanErr(r.error?.message ?? '無法解析');
+      }
+    });
+  }
+
+  function handleManualLookup() {
+    setScanErr(null);
+    if (!stationId) {
+      setScanErr('請先選擇關卡');
+      return;
+    }
+    if (manualId.trim().length < 6) {
+      setScanErr('請輸入完整玩家 ID（≥ 6 碼）');
+      return;
+    }
+    busyTransition(async () => {
+      const r = await lookupPlayerByManualId(manualId.trim(), stationId);
+      if (r.ok) {
+        setScanned({
+          player: r.data!.player,
+          qrToken: null,
+          // 手動輸入路徑：強制不顯示重生鍵（規格 §4.2 / V2.md §下地獄機制）
+          allowRebirth: false,
+          source: 'manual',
+        });
+        setManualId('');
+      } else {
+        setScanErr(r.error?.message ?? '查無此玩家');
       }
     });
   }
@@ -103,10 +146,10 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
   }
 
   function handleRebirth() {
-    if (!scanned) return;
+    if (!scanned || !scanned.qrToken) return;
     if (!confirm(`重生玩家「${scanned.player.name}」？\n清空：四項參數歸零、所有持股、銀行借款、所有道具\n此操作不可復原。`)) return;
     busyTransition(async () => {
-      const r = await rebirthPlayer({ qrToken: scanned.qrToken, stationId });
+      const r = await rebirthPlayer({ qrToken: scanned.qrToken!, stationId });
       if (r.ok) {
         showToast(true, `已重生 ${scanned.player.name}（清 ${r.data!.cleared.stocks} 股、${r.data!.cleared.loans} 筆借貸、${r.data!.cleared.items} 個道具）`);
         setScanned(null);
@@ -183,16 +226,53 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
         )}
       </section>
 
-      {/* 掃碼大按鈕 */}
+      {/* 掃碼大按鈕 + 手動 ID 輸入 */}
       {!scanned && (
-        <button
-          onClick={() => setScanOpen(true)}
-          disabled={!stationId}
-          className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 rounded-3xl py-10 flex flex-col items-center gap-2 shadow-[0_0_30px_rgba(245,158,11,0.3)] mb-3"
-        >
-          <QrCode className="w-16 h-16" />
-          <span className="text-xl font-bold">掃描玩家 QR</span>
-        </button>
+        <>
+          <button
+            onClick={() => setScanOpen(true)}
+            disabled={!stationId}
+            className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 rounded-3xl py-8 flex flex-col items-center gap-2 shadow-[0_0_30px_rgba(245,158,11,0.3)] mb-3"
+          >
+            <QrCode className="w-14 h-14" />
+            <span className="text-xl font-bold">掃描玩家 QR</span>
+          </button>
+
+          <div className="relative my-3 flex items-center">
+            <div className="flex-1 border-t border-zinc-800"></div>
+            <span className="px-3 text-xs text-zinc-500">或</span>
+            <div className="flex-1 border-t border-zinc-800"></div>
+          </div>
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-3">
+            <p className="text-xs text-zinc-400 mb-2 flex items-center gap-1.5">
+              <Search className="w-3.5 h-3.5" />
+              手動輸入玩家 ID（掃碼失敗時用）
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={manualId}
+                onChange={(e) => setManualId(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleManualLookup();
+                }}
+                disabled={!stationId || busy}
+                placeholder="貼上或輸入玩家 ID（≥ 6 碼）"
+                className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm font-mono disabled:opacity-50"
+              />
+              <button
+                onClick={handleManualLookup}
+                disabled={!stationId || busy || manualId.trim().length < 6}
+                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 px-4 rounded-lg text-sm font-bold min-h-[44px]"
+              >
+                查詢
+              </button>
+            </div>
+            <p className="text-[0.625rem] text-zinc-600 mt-2 leading-relaxed">
+              ⚠️ 重生鍵需走 QR 掃碼路徑。手動輸入即使玩家在地獄狀態，也不會出現重生按鈕。
+            </p>
+          </div>
+        </>
       )}
 
       {scanErr && (
@@ -207,7 +287,13 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
         <section className="bg-zinc-900 border border-amber-500/40 rounded-2xl p-3 mb-3">
           <div className="flex justify-between items-start mb-3">
             <div>
-              <p className="text-xs text-zinc-500">已掃描</p>
+              <p className="text-xs text-zinc-500 flex items-center gap-1">
+                {scanned.source === 'qr' ? (
+                  <><QrCode className="w-3 h-3" /> QR 掃碼</>
+                ) : (
+                  <><Search className="w-3 h-3" /> 手動輸入</>
+                )}
+              </p>
               <h3 className="text-lg font-bold text-amber-400">{scanned.player.name}</h3>
               <p className="text-xs text-zinc-500 font-mono">{scanned.player.user_id}</p>
               {scanned.player.destiny_name && <p className="text-xs text-zinc-500">命格：{scanned.player.destiny_name}</p>}
@@ -231,11 +317,13 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
               <Skull className="w-8 h-8 text-rose-500 mx-auto mb-2" />
               <p className="text-rose-400 font-bold mb-2">玩家處於地獄狀態</p>
               <p className="text-xs text-zinc-400 mb-3">
-                {scanned.allowRebirth
-                  ? '此關卡具備重生鍵權限，可執行重生。'
-                  : '此關卡無重生鍵，請帶玩家到具備重生鍵的關卡。'}
+                {scanned.source === 'manual'
+                  ? '⚠️ 手動輸入路徑無法重生。請改請玩家拿出 QR 給你掃描，重生鍵才會出現。'
+                  : scanned.allowRebirth
+                    ? '此關卡具備重生鍵權限，可執行重生。'
+                    : '此關卡無重生鍵，請帶玩家到具備重生鍵的關卡。'}
               </p>
-              {scanned.allowRebirth && (
+              {scanned.allowRebirth && scanned.source === 'qr' && (
                 <button
                   onClick={handleRebirth}
                   disabled={busy}

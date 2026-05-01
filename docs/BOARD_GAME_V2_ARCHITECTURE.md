@@ -593,7 +593,8 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `listMyQuickActions(captainUserId)` | 列出該關主已建立的快捷模組 | 無 |
 | `upsertQuickAction(payload)` | 新增/編輯快捷模組 | 無 |
 | `deleteQuickAction(id)` | 刪除快捷模組 | 無 |
-| `lookupPlayerByQR(qrToken)` | QR 解碼 → 取得玩家四項參數與道具；同時回傳該關卡 `allow_rebirth` 供前端決定是否顯示重生按鈕 | 無 |
+| `lookupPlayerByQR(qrToken, stationId)` | QR HMAC 驗證 → 取得玩家四項參數與道具；回傳 `source: 'qr'` 與該關卡 `allow_rebirth` 供前端決定是否顯示重生按鈕 | 無 |
+| `lookupPlayerByManualId(userId, stationId)` | 手動輸入 ID 查找玩家（QR 失效後備）。要求 `userId.length ≥ 6`。回傳 `source: 'manual'`；**前端據此隱藏重生按鈕**，且 `rebirthPlayer` action 仍只收 qrToken 不收 userId，後端無法被繞過 | 無 |
 | `applyQuickAction(captainUserId, targetUserId, quickActionId)` | 套用快捷模組：(1) 驗條件 (2) **驗使用次數限額**（QuickAction / Station 各自的 player_max_uses / global_max_uses，任一超出回 `USAGE_LIMIT_EXCEEDED`）(3) 套用四項參數變動（health 寫入時 cap 100）(4) UPSERT `StationUsage` / `QuickActionUsage` `count += 1`、UPDATE `Station.global_use_count` / `QuickAction.global_use_count` += 1 | pg tx |
 | `grantItem(captainUserId, targetUserId, itemId)` | 單獨發放道具 | pg tx |
 | `rebirthPlayer(captainUserId, targetUserId, stationId)` | 重生玩家：四項參數重設為重生初始值（健康最高 100）、清空 `bank_loan` 與 `loan_updated_at`、**清空 `StockHolding`（所有持股歸零）**、**清空 `PlayerItem`（所有道具刪除，含手術執照、財神爺 BUFF 等身份識別道具）**、解除死亡 | pg tx |

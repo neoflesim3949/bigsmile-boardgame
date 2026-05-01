@@ -12,7 +12,7 @@
 - 核心參數：金錢、健康、福分、業力
 - 角色：**三分互斥** — 大會管理員 / 玩家 / 關主（關主**不參與遊戲本身**，純發放分數的工具人）；活動看板靠 display token 唯讀，不算 Account 角色
 - 主要頁面：管理後台（桌面優先）、關主後台 / 掃碼（手機）、玩家首頁、股市、活動看板
-- 特殊功能:**重生鍵** — 特定關卡的關主可對玩家執行「重生」：**全部歸零重來** — 四項參數重設為重生初始值、清空所有持股、清空銀行借款（含 `loan_updated_at`）、**清空所有道具**。**前置防呆**：玩家必須**主動**在地獄畫面把 QR 拿給關主掃，且後端 pg tx 內即時驗證 `health ≤ 0 || blessing ≤ 0`，未死亡的玩家不能被任意重置
+- 特殊功能:**重生鍵** — 特定關卡的關主可對玩家執行「重生」：**全部歸零重來** — 四項參數重設為重生初始值、清空所有持股、清空銀行借款（含 `loan_updated_at`）、**清空所有道具**。**前置防呆**：玩家必須**主動**在地獄畫面把 QR 拿給關主掃（**手動輸入 ID 路徑不會出現重生鍵**，前後端雙重驗證），且後端 pg tx 內即時驗證 `health ≤ 0 || blessing ≤ 0`，未死亡的玩家不能被任意重置
 - 玩家進入頁面時若 `AppSettings.CardDrawMode==='true'` 且 `destiny_name=NULL` → middleware 強制導 `/onboarding` 抽命格範本（隨機從啟用中 `InitialValueTemplate` 抽一張）；抽完才能進 `/`。**觸發條件不是「首次登入」**：只要兩條件同時成立（抽卡模式開啟 + 尚無命格）就會被導向，無論第幾次進站。若 `CardDrawMode==='false'` 或玩家已有 `destiny_name`，自行進 `/onboarding` 一律被擋回 `/`
 - 主題：`/admin/*` 與 `/display/*` **強制深色 + md 字級**；其他路由跟玩家偏好（`pref_theme` / `pref_font_size` localStorage）。詳見架構文件 §12.3
 - **回合制**：主持人後台按「下一回合」按鈕同時推進股價 + 結算所有借款利息（每 10 分鐘 1 次，120 分鐘共 12 回合）；**不用 cron**（Supabase 免費版不支援）
@@ -341,7 +341,7 @@ app/
 - [ ] 關主操作沒驗 `Station.captain_user_ids` 是否包含自己（即使 `role==='captain'` 也要查指派站）
 - [ ] 重生操作沒驗 `Station.allow_rebirth = true`（即使是該站關主也不能在未開放的站執行重生）
 - [ ] 重生操作沒驗目標玩家「當前處於地獄狀態」（`health ≤ 0 || blessing ≤ 0`）—— pg tx 內必須即時讀 `PlayerStats` 二次驗證，未死亡的玩家直接 reject `PLAYER_NOT_DEAD`，防止關主對非死亡玩家任意重置
-- [ ] 重生 server action 接受手動輸入的 `targetUserId` 而非 `lookupPlayerByQR` 解碼結果（必須走 QR 掃碼路徑，不可繞過）
+- [ ] 重生 server action 接受手動輸入的 `targetUserId` 而非 `lookupPlayerByQR` 解碼結果（必須走 QR 掃碼路徑，不可繞過）。`/captain/scan` 雖然有「手動輸入 ID」UI 但只用於套用快捷模組；`scanned.source === 'manual'` 時前端不顯示重生按鈕，且 `rebirthPlayer` action 仍只收 `qrToken` 參數，後端無法被繞過
 - [ ] `applyQuickAction` 沒檢查 `Station` / `QuickAction` 的 `player_max_uses` / `global_max_uses`（任一達上限應拒絕，回 `USAGE_LIMIT_EXCEEDED`）
 - [ ] 計數更新（`UPSERT StationUsage` / `QuickActionUsage` + `UPDATE global_use_count`）沒包在套用變動的同一 pg tx（會導致超發）
 - [ ] 玩家 `getMyStats` / `getStockMarket` 的 `manual=true` 路徑沒做 server-side 60 秒節流（只靠前端 disable 按鈕會被繞過）；正確做法是用 `UPDATE ... WHERE last_manual_refresh_at < now() - interval '60s' RETURNING true` 的 atomic SQL，rowcount=0 直接回 `REFRESH_RATE_LIMITED`

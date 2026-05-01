@@ -9,8 +9,15 @@ import { issueMyQrToken } from '@/app/actions/player';
  * QR 按鈕 + 彈窗。
  * 真實 HMAC token（5 分鐘 TTL，可在 AppSettings.QRTokenTTL 調整）。
  * 點「重新生成」會打 server action 取新 token。
+ *
+ * 同時顯示姓名 + UserID 作為「掃碼失敗的後備」— 關主可改用手動輸入 ID。
  */
-export default function QrButton() {
+interface QrButtonProps {
+  name?: string;
+  userId?: string;
+}
+
+export default function QrButton({ name, userId }: QrButtonProps = {}) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [ttl, setTtl] = useState(300);
@@ -72,6 +79,20 @@ export default function QrButton() {
             </button>
 
             <h2 className="text-lg font-bold text-zinc-100 mb-4 text-center">我的 QR Code</h2>
+
+            {(name || userId) && (
+              <div className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 mb-4 text-center">
+                {name && <p className="text-2xl font-bold text-amber-400 leading-tight">{name}</p>}
+                {userId && (
+                  <p className="text-zinc-500 font-mono text-sm mt-1 select-all">
+                    ID：<span className="text-zinc-300 select-all">{userId}</span>
+                  </p>
+                )}
+                <p className="text-[0.625rem] text-zinc-600 mt-1">
+                  掃碼失敗時，請關主直接輸入上方 ID
+                </p>
+              </div>
+            )}
 
             <div className="w-full aspect-square bg-white rounded-xl flex items-center justify-center mb-4 p-4">
               {token ? (

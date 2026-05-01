@@ -64,7 +64,7 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
           ，所有功能停用。請找擁有「重生鍵」的關主掃描你的 QR Code 執行重生。
         </p>
         <div className="bg-zinc-900 border border-rose-900/40 rounded-2xl p-6 mb-4">
-          <QrButton />
+          <QrButton name={stats.name} userId={stats.user_id} />
           <p className="text-xs text-zinc-500 mt-3">點擊上方按鈕展示你的 QR Code</p>
         </div>
         <p className="text-xs text-zinc-600">{stats.name} · {stats.user_id}</p>
@@ -82,7 +82,7 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
           {stats.destiny_name && <p className="text-xs text-zinc-500 mt-0.5">命格：{stats.destiny_name}</p>}
         </div>
         <div className="flex items-center gap-2">
-          <QrButton />
+          <QrButton name={stats.name} userId={stats.user_id} />
           <button
             onClick={handleRefresh}
             disabled={cooldown > 0 || pending}
