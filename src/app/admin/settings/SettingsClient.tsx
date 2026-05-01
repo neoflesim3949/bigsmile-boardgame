@@ -16,17 +16,18 @@ import type { AppSettingsKey } from '@/lib/settings';
 const THEME_OPTIONS = ['amber', 'teal', 'purple', 'rose', 'sky', 'zinc'] as const;
 type Theme = (typeof THEME_OPTIONS)[number];
 
-interface DangerActionInfo {
-  label: string;
-  desc: string;
-  op: DangerOp;
-}
-
 const CONFIRM_STEPS = [
   '你確定要執行此操作嗎？',
   '此操作無法復原，請再次確認。',
   '最後確認：資料將永久清除，確定繼續？',
 ];
+
+interface DangerActionInfo {
+  label: string;
+  desc: string;
+  op: DangerOp;
+  highlight?: boolean;
+}
 
 interface Props {
   initialSettings: Record<string, string>;
@@ -39,10 +40,10 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
   const [activeAction, setActiveAction] = useState<DangerActionInfo | null>(null);
   const [editing, setEditing] = useState<TemplateRow | null>(null);
   const [savingSettings, savingSettingsTransition] = useTransition();
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  function showToast(msg: string) {
-    setToast(msg);
+  function showToast(ok: boolean, msg: string) {
+    setToast({ ok, msg });
     setTimeout(() => setToast(null), 2500);
   }
 
@@ -54,8 +55,8 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
     savingSettingsTransition(async () => {
       const payload: SettingsPayload = settings as SettingsPayload;
       const r = await updateAppSettings(payload);
-      if (r.ok) showToast(`已更新 ${r.data!.updated} 項設定`);
-      else showToast(`儲存失敗：${r.error?.message ?? ''}`);
+      if (r.ok) showToast(true, `已更新 ${r.data!.updated} 項設定`);
+      else showToast(false, `儲存失敗：${r.error?.message ?? ''}`);
     });
   }
 
@@ -78,46 +79,30 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* 遊戲狀態旗標 */}
-        <section className="glass-panel p-6 rounded-2xl space-y-5 lg:col-span-2">
-          <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">遊戲狀態旗標</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <ToggleRow
-              label="活動進行中（BoardGameEnabled）"
-              desc="開啟後玩家可進行所有寫入操作；關閉時顯示「活動尚未開始」"
-              checked={settings.BoardGameEnabled === 'true'}
-              onChange={(v) => setField('BoardGameEnabled', v ? 'true' : 'false')}
-            />
-            <ToggleRow
-              label="抽卡模式（CardDrawMode）"
-              desc="開啟後玩家進入頁面時若無命格會強制抽卡"
-              checked={settings.CardDrawMode === 'true'}
-              onChange={(v) => setField('CardDrawMode', v ? 'true' : 'false')}
-            />
-            <ToggleRow
-              label="導覽遊戲模式（TourMode）"
-              desc="工作人員核對頁面用，所有玩家寫入按鈕停用"
-              checked={settings.TourMode === 'true'}
-              onChange={(v) => setField('TourMode', v ? 'true' : 'false')}
-            />
+        {/* Row 1: UI 顯示設定 */}
+        <section className="glass-panel p-6 rounded-2xl space-y-5">
+          <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">數值顯示設定</h3>
+          <div className="flex items-center justify-between p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
+            <div>
+              <p className="font-semibold text-zinc-200">顯示隱藏參數 (福分與業力)</p>
+              <p className="text-sm text-zinc-500 mt-1">開啟後玩家將能看見福分與業力數值。</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.ShowAllStats === 'true'}
+                onChange={(e) => setField('ShowAllStats', e.target.checked ? 'true' : 'false')}
+                className="sr-only peer"
+              />
+              <div className="w-14 h-7 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
           </div>
         </section>
 
-        {/* 數值顯示 */}
-        <section className="glass-panel p-6 rounded-2xl space-y-5">
-          <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">數值顯示設定</h3>
-          <ToggleRow
-            label="顯示隱藏參數（福分與業力）"
-            desc="開啟後玩家將能看見福分與業力數值；關閉時只顯示金錢與健康"
-            checked={settings.ShowAllStats === 'true'}
-            onChange={(v) => setField('ShowAllStats', v ? 'true' : 'false')}
-          />
-        </section>
-
-        {/* 計分權重 */}
+        {/* Row 1: 最終計分權重 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5">
           <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">最終計分權重</h3>
-          <p className="text-xs text-zinc-500">公式：金錢 × 權重 + 福分 × 權重 − 業力 × 權重</p>
+          <p className="text-xs text-zinc-500 mb-4">公式：金錢 × 權重 + 福分 × 權重 − 業力 × 權重</p>
           <div className="grid grid-cols-3 gap-4">
             <NumField label="金錢" color="amber" step="0.01" value={settings.ScoreWeightMoney ?? '0.05'} onChange={(v) => setField('ScoreWeightMoney', v)} />
             <NumField label="福分" color="teal" value={settings.ScoreWeightBlessing ?? '200'} onChange={(v) => setField('ScoreWeightBlessing', v)} />
@@ -125,51 +110,40 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
           </div>
         </section>
 
-        {/* 預設新手初始值 */}
+        {/* Row 2: 預設新手初始值 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5">
           <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">預設新手初始值</h3>
-          <p className="text-xs text-zinc-500">沒有指定範本時的 fallback 數值</p>
+          <p className="text-xs text-zinc-500 mb-4">當沒有指定範本時使用的預設數值。</p>
           <div className="grid grid-cols-2 gap-4">
-            <NumField label="初始金錢" color="amber" value={settings.InitialMoney ?? '1000'} onChange={(v) => setField('InitialMoney', v)} />
-            <NumField label="初始健康" color="rose" value={settings.InitialHealth ?? '80'} onChange={(v) => setField('InitialHealth', v)} />
+            <NumField label="初始金錢" color="amber" value={settings.InitialMoney ?? '5000'} onChange={(v) => setField('InitialMoney', v)} />
+            <NumField label="初始健康" color="rose" value={settings.InitialHealth ?? '100'} onChange={(v) => setField('InitialHealth', v)} />
             <NumField label="初始福分" color="teal" value={settings.InitialBlessing ?? '10'} onChange={(v) => setField('InitialBlessing', v)} />
             <NumField label="初始業力" color="purple" value={settings.InitialKarma ?? '0'} onChange={(v) => setField('InitialKarma', v)} />
           </div>
         </section>
 
-        {/* 重生參數 */}
+        {/* Row 2: 重生參數 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5">
           <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">重生後初始值</h3>
-          <p className="text-xs text-zinc-500">玩家在特定關卡執行重生後賦予的數值（健康最高 100）</p>
+          <p className="text-xs text-zinc-500 mb-4">玩家在特定關卡執行重生操作後，將被賦予這些數值。</p>
           <div className="grid grid-cols-2 gap-4">
             <NumField label="重生金錢" color="amber" value={settings.RebirthMoney ?? '500'} onChange={(v) => setField('RebirthMoney', v)} />
-            <NumField label="重生健康" color="rose" value={settings.RebirthHealth ?? '50'} onChange={(v) => setField('RebirthHealth', v)} />
+            <NumField label="重生健康" color="rose" value={settings.RebirthHealth ?? '60'} onChange={(v) => setField('RebirthHealth', v)} />
             <NumField label="重生福分" color="teal" value={settings.RebirthBlessing ?? '5'} onChange={(v) => setField('RebirthBlessing', v)} />
             <NumField label="重生業力" color="purple" value={settings.RebirthKarma ?? '0'} onChange={(v) => setField('RebirthKarma', v)} />
           </div>
         </section>
 
-        {/* 換匯 / 銀行 / 刷新 */}
-        <section className="glass-panel p-6 rounded-2xl space-y-5">
-          <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">換匯 / 銀行 / 節流</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <NumField label="全域匯率（1福報=N金錢）" color="amber" value={settings.ExchangeRate ?? '10'} onChange={(v) => setField('ExchangeRate', v)} />
-            <NumField label="手動刷新冷卻秒數" color="amber" value={settings.ManualRefreshCooldownSeconds ?? '60'} onChange={(v) => setField('ManualRefreshCooldownSeconds', v)} />
-            <NumField label="銀行 1 福分=N 金錢額度" color="teal" value={settings.BankLoanCapacityRatio ?? '10'} onChange={(v) => setField('BankLoanCapacityRatio', v)} />
-            <NumField label="銀行利息每回合扣福分" color="teal" value={settings.BankInterestBlessingAmount ?? '1'} onChange={(v) => setField('BankInterestBlessingAmount', v)} />
-          </div>
-        </section>
-
-        {/* 命格範本 CRUD */}
+        {/* Row 3: 新手命格範本池 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5 lg:col-span-2 border-t-4 border-t-purple-500">
           <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
             <div>
-              <h3 className="text-lg font-bold text-zinc-200">新手命格範本（抽卡池）</h3>
-              <p className="text-xs text-zinc-500 mt-1">啟用中的範本會被列入抽卡池，玩家進入抽卡頁時隨機抽取一張</p>
+              <h3 className="text-lg font-bold text-zinc-200">新手命格範本 (抽卡池)</h3>
+              <p className="text-xs text-zinc-500 mt-1">啟用中的範本會被列入抽卡池，玩家進入抽卡頁時隨機抽取一張。</p>
             </div>
             <button
               onClick={() => setEditing(emptyTemplate())}
-              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-zinc-700 flex items-center gap-1 min-h-[44px]"
+              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-zinc-700 flex items-center gap-1 min-h-[40px]"
             >
               <Plus className="w-4 h-4" /> 新增命格
             </button>
@@ -180,14 +154,20 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
               <TemplateCard
                 key={t.id}
                 t={t}
+                onToggle={async (active) => {
+                  const r = await upsertTemplate({ ...t, is_active: active });
+                  if (r.ok) {
+                    setTemplates((arr) => arr.map((x) => x.id === t.id ? r.data! : x));
+                  } else showToast(false, r.error?.message ?? '');
+                }}
                 onEdit={() => setEditing(t)}
                 onDelete={async () => {
                   if (!confirm(`確定刪除命格「${t.label}」？`)) return;
                   const r = await deleteTemplate(t.id);
                   if (r.ok) {
                     setTemplates((arr) => arr.filter((x) => x.id !== t.id));
-                    showToast('已刪除');
-                  } else showToast(r.error?.message ?? '刪除失敗');
+                    showToast(true, '已刪除');
+                  } else showToast(false, r.error?.message ?? '刪除失敗');
                 }}
               />
             ))}
@@ -197,10 +177,10 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
           </div>
         </section>
 
-        {/* 危險操作 */}
+        {/* Row 4: 危險操作 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5 lg:col-span-2 border-t-4 border-t-rose-600 bg-gradient-to-br from-rose-950/20 to-zinc-950">
           <div className="border-b border-rose-900/50 pb-3">
-            <h3 className="text-lg font-bold text-rose-500">危險操作區（Danger Zone）</h3>
+            <h3 className="text-lg font-bold text-rose-500">危險操作區 (Danger Zone)</h3>
             <p className="text-xs text-rose-400/70 mt-1">
               這些操作將清除遊戲進度與數據，操作後無法復原。每個按鈕需經過 <strong className="text-rose-400">3 次確認</strong>才會執行。
             </p>
@@ -223,8 +203,7 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
               onActivate={setActiveAction}
             />
             <DangerButton
-              info={{ label: '重置使用次數', op: 'reset_usage_count', desc: '清空關卡 / 快捷模組的使用次數計數，但保留定義與玩家財富。' }}
-              highlight
+              info={{ label: '重置使用次數', op: 'reset_usage_count', desc: '清空關卡 / 快捷模組的使用次數計數，但保留定義與玩家財富。', highlight: true }}
               onActivate={setActiveAction}
             />
           </div>
@@ -235,7 +214,7 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
         <ConfirmModal
           info={activeAction}
           onClose={() => setActiveAction(null)}
-          onConfirmed={() => showToast(`已執行：${activeAction.label}`)}
+          onConfirmed={() => showToast(true, `已執行：${activeAction.label}`)}
         />
       )}
 
@@ -254,22 +233,22 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
               return [...arr, saved];
             });
             setEditing(null);
-            showToast('已儲存範本');
+            showToast(true, '已儲存範本');
           }}
         />
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 bg-zinc-900 border border-amber-500/40 text-amber-300 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 z-40">
-          <CheckCircle2 className="w-4 h-4" />
-          <span className="text-sm">{toast}</span>
+        <div className={`fixed bottom-6 right-6 ${toast.ok ? 'bg-zinc-900 border-amber-500/40 text-amber-300' : 'bg-rose-950 border-rose-700 text-rose-300'} border px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 z-40`}>
+          {toast.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          <span className="text-sm">{toast.msg}</span>
         </div>
       )}
     </div>
   );
 }
 
-// ─── 子元件 ──────────────────────────────────────────────
+// ─── 子元件 ───
 
 function emptyTemplate(): TemplateRow {
   return {
@@ -285,30 +264,6 @@ function emptyTemplate(): TemplateRow {
     karma: 0,
     is_active: true,
   };
-}
-
-function ToggleRow({
-  label, desc, checked, onChange,
-}: {
-  label: string; desc: string; checked: boolean; onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-start justify-between p-4 bg-zinc-900/50 rounded-lg border border-zinc-800 gap-3">
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-zinc-200 text-sm">{label}</p>
-        <p className="text-xs text-zinc-500 mt-1">{desc}</p>
-      </div>
-      <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-          className="sr-only peer"
-        />
-        <div className="w-12 h-6 bg-zinc-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
-      </label>
-    </div>
-  );
 }
 
 const COLOR_MAP: Record<string, { text: string; ring: string }> = {
@@ -339,9 +294,12 @@ function NumField({
 }
 
 function TemplateCard({
-  t, onEdit, onDelete,
+  t, onToggle, onEdit, onDelete,
 }: {
-  t: TemplateRow; onEdit: () => void; onDelete: () => void;
+  t: TemplateRow;
+  onToggle: (active: boolean) => void | Promise<void>;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 relative group">
@@ -349,10 +307,17 @@ function TemplateCard({
         <h4 className="font-bold text-zinc-200 flex items-center gap-2">
           <span className="text-xl">{t.emoji}</span>
           {t.label}
-          {!t.is_active && <span className="text-xs text-zinc-500">（停用）</span>}
         </h4>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={t.is_active}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+        </label>
       </div>
-      <p className="text-xs text-zinc-500 mb-3 leading-relaxed line-clamp-2">{t.description || '—'}</p>
       <div className="grid grid-cols-2 gap-2 text-sm">
         <div className="flex justify-between"><span className="text-zinc-500">金錢</span><span className="text-amber-400 font-medium">{t.money}</span></div>
         <div className="flex justify-between"><span className="text-zinc-500">健康</span><span className="text-rose-400 font-medium">{t.health}</span></div>
@@ -433,10 +398,10 @@ function TemplateModal({
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <NumInput label="初始金錢" value={draft.money} onChange={(v) => setDraft({ ...draft, money: v })} />
-            <NumInput label="初始健康（0–100）" value={draft.health} onChange={(v) => setDraft({ ...draft, health: Math.min(100, Math.max(0, v)) })} />
-            <NumInput label="初始福分" value={draft.blessing} onChange={(v) => setDraft({ ...draft, blessing: v })} />
-            <NumInput label="初始業力" value={draft.karma} onChange={(v) => setDraft({ ...draft, karma: v })} />
+            <SmallNum label="初始金錢" value={draft.money} onChange={(v) => setDraft({ ...draft, money: v })} />
+            <SmallNum label="初始健康（0–100）" value={draft.health} onChange={(v) => setDraft({ ...draft, health: Math.min(100, Math.max(0, v)) })} />
+            <SmallNum label="初始福分" value={draft.blessing} onChange={(v) => setDraft({ ...draft, blessing: v })} />
+            <SmallNum label="初始業力" value={draft.karma} onChange={(v) => setDraft({ ...draft, karma: v })} />
           </div>
           <label className="flex items-center gap-2 text-sm text-zinc-300">
             <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />
@@ -457,7 +422,7 @@ function TemplateModal({
   );
 }
 
-function NumInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function SmallNum({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
     <div>
       <label className="text-xs text-zinc-500">{label}</label>
@@ -472,9 +437,9 @@ function NumInput({ label, value, onChange }: { label: string; value: number; on
 }
 
 function DangerButton({
-  info, highlight = false, onActivate,
+  info, onActivate,
 }: {
-  info: DangerActionInfo; highlight?: boolean; onActivate: (i: DangerActionInfo) => void;
+  info: DangerActionInfo; onActivate: (i: DangerActionInfo) => void;
 }) {
   const [showTip, setShowTip] = useState(false);
   return (
@@ -482,9 +447,9 @@ function DangerButton({
       <button
         onClick={() => onActivate(info)}
         className={`w-full flex flex-col items-center gap-2 py-4 px-3 rounded-xl text-sm font-bold transition-all border min-h-[44px] ${
-          highlight
-            ? 'bg-rose-950/40 hover:bg-rose-600 text-rose-300 hover:text-white border-rose-700/50 hover:border-rose-500'
-            : 'bg-zinc-900 hover:bg-rose-950/60 text-rose-400 border-rose-900/50 hover:border-rose-500/50'
+          info.highlight
+            ? 'bg-rose-950/40 hover:bg-rose-600 text-rose-300 hover:text-white border-rose-700/50 hover:border-rose-500 shadow-[0_0_10px_rgba(225,29,72,0.1)] hover:shadow-[0_0_15px_rgba(225,29,72,0.4)]'
+            : 'bg-zinc-900 hover:bg-rose-950/60 text-rose-400 border-rose-900/50 hover:border-rose-500/50 shadow-[0_0_10px_rgba(225,29,72,0)] hover:shadow-[0_0_10px_rgba(225,29,72,0.2)]'
         }`}
       >
         <span>{info.label}</span>
@@ -499,6 +464,7 @@ function DangerButton({
       {showTip && (
         <div className="absolute bottom-full right-0 mb-2 w-52 bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg p-3 shadow-xl z-20 leading-relaxed">
           {info.desc}
+          <div className="absolute bottom-[-6px] right-3 w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 rotate-45" />
         </div>
       )}
     </div>

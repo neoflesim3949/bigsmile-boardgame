@@ -7,11 +7,13 @@ import { query } from './db';
 
 export type AppSettingsKey =
   | 'BoardGameEnabled'
+  | 'BoardGameStartedAt'
   | 'CardDrawMode'
   | 'TourMode'
   | 'EventStartAt'
   | 'EventEndAt'
   | 'ExchangeRate'
+  | 'ExchangeRateMultiplier'
   | 'TransferFeeRate'
   | 'ScoreWeightMoney'
   | 'ScoreWeightBlessing'
@@ -37,11 +39,13 @@ export type AppSettingsKey =
 
 export const DEFAULT_SETTINGS: Record<AppSettingsKey, string> = {
   BoardGameEnabled: 'false',
+  BoardGameStartedAt: '',
   CardDrawMode: 'false',
   TourMode: 'false',
   EventStartAt: '',
   EventEndAt: '',
   ExchangeRate: '10',
+  ExchangeRateMultiplier: '1.0',
   TransferFeeRate: '0',
   ScoreWeightMoney: '0.05',
   ScoreWeightBlessing: '200',

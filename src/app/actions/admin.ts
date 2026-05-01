@@ -670,6 +670,132 @@ export async function deleteStock(id: string): Promise<ActionResult<null>> {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 股市回合腳本（StockRoundScript / StockRoundEvent）
+// ─────────────────────────────────────────────────────────────
+export type ScriptChangeType = 'percent' | 'fixed';
+
+export interface StockScriptCell {
+  round: number;
+  stock_id: string;
+  change_type: ScriptChangeType;
+  change_value: number;
+}
+
+export interface StockRoundScriptsView {
+  rounds: number[];
+  events: Record<number, string>;
+  cells: Record<string, StockScriptCell>; // key: `${round}_${stock_id}`
+}
+
+export async function listStockScripts(): Promise<ActionResult<StockRoundScriptsView>> {
+  try {
+    await requireRole('admin');
+    const cellsR = await query<StockScriptCell>(
+      `SELECT round, stock_id, change_type, change_value
+       FROM "StockRoundScript" ORDER BY round ASC`,
+    );
+    const eventsR = await query<{ round: number; event_text: string }>(
+      `SELECT round, event_text FROM "StockRoundEvent" ORDER BY round ASC`,
+    );
+    const cells: Record<string, StockScriptCell> = {};
+    const roundSet = new Set<number>();
+    for (const c of cellsR.rows) {
+      cells[`${c.round}_${c.stock_id}`] = c;
+      roundSet.add(c.round);
+    }
+    const events: Record<number, string> = {};
+    for (const e of eventsR.rows) {
+      events[e.round] = e.event_text;
+      roundSet.add(e.round);
+    }
+    return ok({
+      rounds: [...roundSet].sort((a, b) => a - b),
+      events,
+      cells,
+    });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const scriptCellSchema = z.object({
+  round: z.number().int().positive(),
+  stock_id: z.string().uuid(),
+  change_type: z.enum(['percent', 'fixed']),
+  change_value: z.number().int(),
+});
+
+export async function upsertStockScriptCell(
+  p: z.infer<typeof scriptCellSchema>,
+): Promise<ActionResult<StockScriptCell>> {
+  try {
+    await requireRole('admin');
+    const data = scriptCellSchema.parse(p);
+    const r = await query<StockScriptCell>(
+      `INSERT INTO "StockRoundScript" (round, stock_id, change_type, change_value)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (round, stock_id) DO UPDATE SET
+         change_type = EXCLUDED.change_type,
+         change_value = EXCLUDED.change_value,
+         updated_at = now()
+       RETURNING round, stock_id, change_type, change_value`,
+      [data.round, data.stock_id, data.change_type, data.change_value],
+    );
+    revalidatePath('/admin/stocks');
+    return ok(r.rows[0]);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteStockScriptCell(round: number, stockId: string): Promise<ActionResult<null>> {
+  try {
+    await requireRole('admin');
+    await query(
+      `DELETE FROM "StockRoundScript" WHERE round = $1 AND stock_id = $2`,
+      [round, stockId],
+    );
+    revalidatePath('/admin/stocks');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setRoundEvent(round: number, text: string): Promise<ActionResult<null>> {
+  try {
+    await requireRole('admin');
+    if (!Number.isInteger(round) || round <= 0) throw new ActionError('INVALID_INPUT', '');
+    if (text.trim() === '') {
+      await query(`DELETE FROM "StockRoundEvent" WHERE round = $1`, [round]);
+    } else {
+      await query(
+        `INSERT INTO "StockRoundEvent" (round, event_text)
+         VALUES ($1, $2)
+         ON CONFLICT (round) DO UPDATE SET event_text = EXCLUDED.event_text, updated_at = now()`,
+        [round, text.slice(0, 200)],
+      );
+    }
+    revalidatePath('/admin/stocks');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteWholeRoundScript(round: number): Promise<ActionResult<null>> {
+  try {
+    await requireRole('admin');
+    await query(`DELETE FROM "StockRoundScript" WHERE round = $1`, [round]);
+    await query(`DELETE FROM "StockRoundEvent" WHERE round = $1`, [round]);
+    revalidatePath('/admin/stocks');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // 換匯所方案 CRUD
 // ─────────────────────────────────────────────────────────────
 const exchangeOptSchema = z.object({
@@ -1061,6 +1187,14 @@ export interface AdminDashboardData {
     stocks: number;
   };
   board: BoardConfigRow;
+  flags: {
+    tour_mode: boolean;
+    card_draw_mode: boolean;
+    game_enabled: boolean;
+    game_started_at: string | null;
+    show_all_stats: boolean;
+    exchange_rate_multiplier: number;
+  };
   scoring: {
     enabled: boolean;
     triggered_at: string | null;
@@ -1080,6 +1214,13 @@ export interface AdminDashboardData {
 export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardData>> {
   try {
     await requireRole('admin');
+
+    // 確保 BoardConfig 單列存在
+    await query(
+      `INSERT INTO "BoardConfig" (id, title) VALUES (1, '開運大富翁 ── 大廳')
+       ON CONFLICT (id) DO NOTHING`,
+    );
+
     const counts = await query<{ players: string; captains: string; stations: string; items: string; stocks: string }>(
       `SELECT
          (SELECT COUNT(*) FROM "Account" WHERE role='player')::text AS players,
@@ -1093,30 +1234,38 @@ export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardDa
               marquee_text, marquee_until, final_scoring_triggered_at, current_round, last_tick_at
        FROM "BoardConfig" WHERE id = 1`,
     );
-    if (board.rows.length === 0) {
-      await query(`INSERT INTO "BoardConfig" (id, title) VALUES (1, '開運大富翁 ── 大廳')`);
-      return getAdminDashboard();
-    }
     const settings = await query<{ key: string; value: string }>(
       `SELECT key, value FROM "AppSettings"
-       WHERE key IN ('ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma')`,
+       WHERE key IN (
+         'ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma',
+         'TourMode', 'CardDrawMode', 'BoardGameEnabled', 'BoardGameStartedAt',
+         'ShowAllStats', 'ExchangeRateMultiplier'
+       )`,
     );
     const sm = new Map(settings.rows.map((r) => [r.key, r.value] as const));
-    const wM = Number(sm.get('ScoreWeightMoney') ?? '0.05');
-    const wB = Number(sm.get('ScoreWeightBlessing') ?? '200');
-    const wK = Number(sm.get('ScoreWeightKarma') ?? '150');
+    const wM = Number(sm.get('ScoreWeightMoney') ?? '0.05') || 0;
+    const wB = Number(sm.get('ScoreWeightBlessing') ?? '200') || 0;
+    const wK = Number(sm.get('ScoreWeightKarma') ?? '150') || 0;
 
-    const lb = await query<AdminDashboardData['leaderboard'][number]>(
-      `SELECT a.user_id, a.name,
-              ps.money, ps.blessing, ps.health, ps.karma, ps.rebirth_count,
-              ROUND(ps.money * $1 + ps.blessing * $2 - ps.karma * $3)::int AS final_score
+    // 排行榜：純 SELECT 後在 JS 端計分（避免 PG 操作元類型推導問題）
+    const lbRaw = await query<{
+      user_id: string; name: string;
+      money: number; blessing: number; health: number; karma: number;
+      rebirth_count: number;
+    }>(
+      `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.health, ps.karma, ps.rebirth_count
        FROM "Account" a
        JOIN "PlayerStats" ps ON ps.user_id = a.user_id
        WHERE a.role = 'player' AND a.is_active = true
-       ORDER BY final_score DESC NULLS LAST
-       LIMIT 50`,
-      [wM, wB, wK],
+       LIMIT 200`,
     );
+    const leaderboard = lbRaw.rows
+      .map((r) => ({
+        ...r,
+        final_score: Math.round(r.money * wM + r.blessing * wB - r.karma * wK),
+      }))
+      .sort((a, b) => b.final_score - a.final_score)
+      .slice(0, 50);
 
     const dash: AdminDashboardData = {
       counts: {
@@ -1127,13 +1276,64 @@ export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardDa
         stocks: Number(counts.rows[0].stocks),
       },
       board: board.rows[0],
+      flags: {
+        tour_mode: sm.get('TourMode') === 'true',
+        card_draw_mode: sm.get('CardDrawMode') === 'true',
+        game_enabled: sm.get('BoardGameEnabled') === 'true',
+        game_started_at: sm.get('BoardGameStartedAt') || null,
+        show_all_stats: sm.get('ShowAllStats') !== 'false',
+        exchange_rate_multiplier: Number(sm.get('ExchangeRateMultiplier') ?? '1.0') || 1.0,
+      },
       scoring: {
         enabled: Boolean(board.rows[0].final_scoring_triggered_at),
         triggered_at: board.rows[0].final_scoring_triggered_at,
       },
-      leaderboard: lb.rows,
+      leaderboard,
     };
     return ok(dash);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Dashboard 上的快速控制：旗標、權重倍率、遊戲開始
+// ─────────────────────────────────────────────────────────────
+export async function setQuickFlag(
+  key: 'TourMode' | 'CardDrawMode' | 'BoardGameEnabled',
+  value: boolean,
+): Promise<ActionResult<{ key: string; value: boolean }>> {
+  try {
+    const session = await requireRole('admin');
+    await setSetting(key, value ? 'true' : 'false', session.userId);
+    // 第一次開啟 BoardGameEnabled 時記錄起始時間（之後關閉再開不會被覆寫）
+    if (key === 'BoardGameEnabled' && value) {
+      const existing = await query<{ value: string }>(
+        `SELECT value FROM "AppSettings" WHERE key = 'BoardGameStartedAt'`,
+      );
+      if (!existing.rows[0]?.value) {
+        await setSetting('BoardGameStartedAt', new Date().toISOString(), session.userId);
+      }
+    }
+    revalidatePath('/admin');
+    revalidatePath('/admin/settings');
+    return ok({ key, value });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setExchangeRateMultiplier(
+  multiplier: number,
+): Promise<ActionResult<{ multiplier: number }>> {
+  try {
+    const session = await requireRole('admin');
+    if (!Number.isFinite(multiplier) || multiplier < 0 || multiplier > 10) {
+      throw new ActionError('INVALID_INPUT', '倍率需介於 0–10 之間');
+    }
+    await setSetting('ExchangeRateMultiplier', multiplier.toFixed(2), session.userId);
+    revalidatePath('/admin');
+    return ok({ multiplier });
   } catch (err) {
     return fail(err);
   }

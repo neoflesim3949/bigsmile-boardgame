@@ -474,8 +474,12 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
       if (!me) throw new ActionError('NOT_FOUND', '玩家資料不存在');
       assertPlayerAlive(me);
 
+      // 套用 dashboard 即時權重倍率（admin 在 /admin 上調整 ExchangeRateMultiplier）
+      const multStr = await getSetting('ExchangeRateMultiplier');
+      const mult = Number(multStr) || 1.0;
+
       const totalCost = opt.rows[0].blessing_cost_per_unit * data.units;
-      const totalGain = opt.rows[0].money_gain_per_unit * data.units;
+      const totalGain = Math.round(opt.rows[0].money_gain_per_unit * data.units * mult);
       if (me.blessing < totalCost) throw new ActionError('INSUFFICIENT_FUNDS', '福報不足');
 
       const upd = await client.query<{ money: number; blessing: number }>(

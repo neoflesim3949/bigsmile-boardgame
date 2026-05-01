@@ -1,33 +1,86 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import {
-  Users, Users2, MapPin, Package, Activity,
-  Sparkles, Trophy, Play, RefreshCw, AlertCircle, CheckCircle2,
+  Users, MonitorPlay, ArrowUpDown, Eye, Sparkles, CheckCircle2, Lock,
+  AlertCircle, RefreshCw,
 } from 'lucide-react';
-import { triggerFinalScoring, getAdminDashboard, type AdminDashboardData } from '@/app/actions/admin';
+import {
+  setQuickFlag,
+  setExchangeRateMultiplier,
+  triggerFinalScoring,
+  getAdminDashboard,
+  publishMarquee,
+  clearMarquee,
+  type AdminDashboardData,
+} from '@/app/actions/admin';
 import { tickRound } from '@/app/actions/round';
 
-interface Props { initial: AdminDashboardData }
+interface Props {
+  initial: AdminDashboardData;
+}
+
+const PRESET_MULTIPLIERS = [
+  { label: '-50%', value: 0.5 },
+  { label: '-20%', value: 0.8 },
+  { label: '0%', value: 1.0 },
+  { label: '+50%', value: 1.5 },
+  { label: '+100%', value: 2.0 },
+];
 
 export default function AdminDashboardClient({ initial }: Props) {
   const [data, setData] = useState<AdminDashboardData>(initial);
+  const [marqueeText, setMarqueeText] = useState(initial.board.marquee_text);
+  const [marqueeMins, setMarqueeMins] = useState(60);
   const [busy, busyTransition] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 2500);
   }
 
-  function handleRefresh() {
+  async function reload() {
+    const r = await getAdminDashboard();
+    if (r.ok) setData(r.data!);
+  }
+
+  function handleToggle(key: 'TourMode' | 'CardDrawMode', value: boolean) {
     busyTransition(async () => {
-      const r = await getAdminDashboard();
+      const r = await setQuickFlag(key, value);
       if (r.ok) {
-        setData(r.data!);
-        showToast(true, '已更新');
-      }
+        await reload();
+        showToast(true, `${key === 'TourMode' ? '導覽遊戲' : '抽卡模式'}：${value ? '已啟用' : '已關閉'}`);
+      } else showToast(false, r.error?.message ?? '');
+    });
+  }
+
+  function handleStartGame() {
+    if (!data.flags.tour_mode || !data.flags.card_draw_mode) return;
+    busyTransition(async () => {
+      const r = await setQuickFlag('BoardGameEnabled', true);
+      if (r.ok) {
+        await reload();
+        showToast(true, '遊戲已開始');
+      } else showToast(false, r.error?.message ?? '');
+    });
+  }
+
+  function handleTriggerScoring() {
+    if (!confirm('觸發終局結算？\n玩家寫入操作將全部停用，看板自動切換為最終排行榜。\n此操作不可復原。')) return;
+    busyTransition(async () => {
+      const r = await triggerFinalScoring();
+      if (r.ok) {
+        await reload();
+        showToast(true, '終局結算已觸發');
+      } else showToast(false, r.error?.message ?? '');
     });
   }
 
@@ -35,165 +88,345 @@ export default function AdminDashboardClient({ initial }: Props) {
     busyTransition(async () => {
       const r = await tickRound();
       if (r.ok) {
-        showToast(true, `已推進到第 ${r.data!.round} 回合（結算 ${r.data!.players_settled} 位借款玩家）`);
-        const dr = await getAdminDashboard();
-        if (dr.ok) setData(dr.data!);
+        await reload();
+        showToast(true, `推進到第 ${r.data!.round} 回合（結算 ${r.data!.players_settled} 位借款玩家）`);
       } else showToast(false, r.error?.message ?? '');
     });
   }
 
-  function handleTriggerScoring() {
-    if (!confirm('確定觸發終局結算？此操作會凍結遊戲狀態並產出排行榜。\n觸發後玩家無法再執行寫入操作。')) return;
+  function handlePublishMarquee() {
+    if (!marqueeText.trim()) return;
     busyTransition(async () => {
-      const r = await triggerFinalScoring();
+      const r = await publishMarquee(marqueeText, marqueeMins);
       if (r.ok) {
-        showToast(true, '終局結算已觸發');
-        const dr = await getAdminDashboard();
-        if (dr.ok) setData(dr.data!);
+        showToast(true, '已發送至看板');
+        await reload();
       } else showToast(false, r.error?.message ?? '');
     });
   }
+
+  function handleClearMarquee() {
+    busyTransition(async () => {
+      const r = await clearMarquee();
+      if (r.ok) {
+        setMarqueeText('');
+        await reload();
+        showToast(true, '已清除跑馬燈');
+      } else showToast(false, r.error?.message ?? '');
+    });
+  }
+
+  function handleSetMultiplier(v: number) {
+    busyTransition(async () => {
+      const r = await setExchangeRateMultiplier(v);
+      if (r.ok) {
+        await reload();
+        showToast(true, `匯率倍率：${formatMultiplier(v)}`);
+      } else showToast(false, r.error?.message ?? '');
+    });
+  }
+
+  function handleCustomMultiplier() {
+    const input = window.prompt('輸入自訂倍率（0.0–10.0，例：1.25）', data.flags.exchange_rate_multiplier.toFixed(2));
+    if (input === null) return;
+    const v = Number(input);
+    if (!Number.isFinite(v) || v < 0 || v > 10) {
+      showToast(false, '倍率需介於 0–10 之間');
+      return;
+    }
+    handleSetMultiplier(v);
+  }
+
+  // KPI 計算
+  const elapsedText = data.flags.game_started_at && data.flags.game_enabled
+    ? formatElapsed(now - new Date(data.flags.game_started_at).getTime())
+    : '尚未開始';
+  const overdueRound = data.board.last_tick_at
+    ? (now - new Date(data.board.last_tick_at).getTime()) > 10 * 60 * 1000
+    : data.flags.game_enabled;
+  const systemStatus = data.scoring.enabled
+    ? { text: '已結算', color: 'text-rose-400' }
+    : data.flags.game_enabled
+      ? { text: '活動進行中', color: 'text-emerald-400' }
+      : { text: '尚未開始', color: 'text-zinc-400' };
+
+  const canStart = data.flags.tour_mode && data.flags.card_draw_mode && !data.flags.game_enabled;
+  const currentMultiplier = data.flags.exchange_rate_multiplier;
 
   return (
-    <div className="p-8 max-w-7xl mx-auto pb-20">
-      <header className="flex justify-between items-center mb-8 flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">大會管理員後台</h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            目前回合 <span className="text-amber-400 font-bold">{data.board.current_round}</span>
-            {data.board.last_tick_at && <> ／ 上次推進 {new Date(data.board.last_tick_at).toLocaleTimeString()}</>}
-            {data.scoring.enabled && (
-              <span className="ml-3 text-rose-400">⚠ 已觸發終局結算（{new Date(data.scoring.triggered_at!).toLocaleString()}）</span>
-            )}
-          </p>
-        </div>
-        <div className="flex gap-2">
+    <div className="p-8">
+      <header className="flex justify-between items-start mb-8 gap-4 flex-wrap">
+        <h2 className="text-2xl font-bold text-zinc-100 shrink-0">總覽面板</h2>
+        <div className="flex flex-wrap gap-3 items-center justify-end">
           <button
-            onClick={handleRefresh}
+            onClick={() => handleToggle('TourMode', !data.flags.tour_mode)}
             disabled={busy}
-            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-2 rounded-lg text-sm border border-zinc-700 flex items-center gap-2 min-h-[44px]"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border min-h-[40px] ${
+              data.flags.tour_mode
+                ? 'bg-sky-500/20 text-sky-300 border-sky-500/50 shadow-[0_0_12px_rgba(14,165,233,0.3)]'
+                : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-sky-600/50 hover:text-sky-400'
+            }`}
           >
-            <RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
-            重新整理
+            {data.flags.tour_mode ? <CheckCircle2 className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            導覽遊戲
           </button>
+
           <button
-            onClick={handleTick}
-            disabled={busy || data.scoring.enabled}
-            className="bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-zinc-950 px-4 py-2 rounded-lg font-bold flex items-center gap-2 min-h-[44px]"
-            title="推進股價 + 結算所有借款利息（30 秒節流）"
+            onClick={() => handleToggle('CardDrawMode', !data.flags.card_draw_mode)}
+            disabled={busy}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all border min-h-[40px] ${
+              data.flags.card_draw_mode
+                ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-purple-600/50 hover:text-purple-400'
+            }`}
           >
-            <Play className="w-4 h-4" />
-            下一回合
+            {data.flags.card_draw_mode ? <CheckCircle2 className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+            抽卡模式
           </button>
-        </div>
-      </header>
 
-      {/* 統計 + 連結 */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
-        <CountCard icon={<Users2 className="w-5 h-5" />} label="玩家" value={data.counts.players} href="/admin/accounts" />
-        <CountCard icon={<Users className="w-5 h-5" />} label="關主" value={data.counts.captains} href="/admin/accounts" />
-        <CountCard icon={<MapPin className="w-5 h-5" />} label="關卡" value={data.counts.stations} href="/admin/stations" />
-        <CountCard icon={<Package className="w-5 h-5" />} label="道具" value={data.counts.items} href="/admin/items" />
-        <CountCard icon={<Activity className="w-5 h-5" />} label="股票" value={data.counts.stocks} href="/admin/stocks" />
-      </div>
+          <div className="w-px h-8 bg-zinc-700" />
 
-      {/* 後台快速入口 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-        <Link href="/admin/finance" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">財務方案</div>
-          <div className="text-xs text-zinc-500">換匯所 + 銀行借貸</div>
-        </Link>
-        <Link href="/admin/events" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">事件 / 跑馬燈</div>
-          <div className="text-xs text-zinc-500">看板輪播事件 + 即時跑馬燈</div>
-        </Link>
-        <Link href="/admin/board" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">看板與 Token</div>
-          <div className="text-xs text-zinc-500">版型、配色、display token</div>
-        </Link>
-        <Link href="/admin/settings" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">系統參數</div>
-          <div className="text-xs text-zinc-500">遊戲旗標、計分權重、命格範本</div>
-        </Link>
-        <Link href="/admin/stations" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">關卡 / 關主</div>
-          <div className="text-xs text-zinc-500">指派、限額、重生鍵</div>
-        </Link>
-        <Link href="/admin/items" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">道具池</div>
-          <div className="text-xs text-zinc-500">道具定義 CRUD</div>
-        </Link>
-        <Link href="/admin/stocks" className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-          <div className="text-amber-400 text-sm font-bold">股市商品</div>
-          <div className="text-xs text-zinc-500">≤ 10 檔，含當前價</div>
-        </Link>
-      </div>
+          {data.flags.game_enabled ? (
+            <span className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              <CheckCircle2 className="w-4 h-4" /> 遊戲進行中
+            </span>
+          ) : (
+            <button
+              onClick={handleStartGame}
+              disabled={!canStart || busy}
+              title={canStart ? '' : '請先啟用「導覽遊戲」與「抽卡模式」'}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all min-h-[40px] ${
+                canStart
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                  : 'bg-zinc-800 text-zinc-600 border border-zinc-700 cursor-not-allowed'
+              }`}
+            >
+              {canStart ? '▶ 遊戲開始' : <><Lock className="w-4 h-4" /> 遊戲開始</>}
+            </button>
+          )}
 
-      {/* 終局結算 */}
-      <div className="glass-panel rounded-2xl p-6 mb-8 border-l-4 border-l-rose-500 bg-gradient-to-br from-rose-950/20 to-zinc-950">
-        <div className="flex justify-between items-center flex-wrap gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-rose-400 flex items-center gap-2">
-              <Sparkles className="w-5 h-5" /> 終局結算
-            </h3>
-            <p className="text-xs text-zinc-500 mt-1">觸發後玩家寫入操作全部停用，看板自動切換為最終排行榜畫面。**此操作不可復原。**</p>
-          </div>
           {data.scoring.enabled ? (
-            <span className="px-4 py-2 bg-rose-950/60 border border-rose-700 text-rose-300 rounded-lg text-sm">
-              已於 {new Date(data.scoring.triggered_at!).toLocaleString()} 觸發
+            <span className="bg-rose-950 text-rose-400 border border-rose-700 px-4 py-2 rounded-lg text-sm font-bold">
+              已計分
             </span>
           ) : (
             <button
               onClick={handleTriggerScoring}
               disabled={busy}
-              className="bg-rose-600 hover:bg-rose-500 disabled:opacity-60 text-white px-4 py-2 rounded-lg font-bold min-h-[44px]"
+              className="bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] flex items-center gap-2 min-h-[40px]"
             >
-              觸發終局結算
+              ■ 遊戲結束 (計分)
             </button>
           )}
+
+          <Link
+            href="/admin/board"
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-zinc-700 flex items-center gap-2 min-h-[40px]"
+          >
+            <MonitorPlay className="w-4 h-4" /> 開啟活動看板
+          </Link>
+        </div>
+      </header>
+
+      {(!data.flags.tour_mode || !data.flags.card_draw_mode) && !data.flags.game_enabled && (
+        <div className="flex gap-3 mb-6 p-3 rounded-xl bg-zinc-900/50 border border-zinc-800 text-xs text-zinc-500 flex-wrap">
+          <span className={`flex items-center gap-1.5 ${data.flags.tour_mode ? 'text-sky-400' : ''}`}>
+            {data.flags.tour_mode ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span className="w-3.5 h-3.5 rounded-full border border-zinc-600 inline-block" />}
+            導覽遊戲已{data.flags.tour_mode ? '啟用' : '關閉'}
+          </span>
+          <span className="text-zinc-700">·</span>
+          <span className={`flex items-center gap-1.5 ${data.flags.card_draw_mode ? 'text-purple-400' : ''}`}>
+            {data.flags.card_draw_mode ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span className="w-3.5 h-3.5 rounded-full border border-zinc-600 inline-block" />}
+            抽卡模式已{data.flags.card_draw_mode ? '啟用' : '關閉'}
+          </span>
+          <span className="text-zinc-700">·</span>
+          <span className="text-zinc-600">請先啟用以上兩個模式，才能正式開始遊戲。</span>
+        </div>
+      )}
+
+      {/* Row 1: KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <KPICard title="遊戲已進行時間" value={elapsedText} alert={overdueRound && data.flags.game_enabled} alertText="該推進回合了" />
+        <div className="glass-panel p-6 rounded-xl border-t-4 border-t-amber-500">
+          <h3 className="text-zinc-500 text-sm font-medium mb-1">系統狀態</h3>
+          <p className={`text-3xl font-bold ${systemStatus.color}`}>{systemStatus.text}</p>
+        </div>
+        <KPICard title="目前回合數" value={`第 ${data.board.current_round} 回合`} />
+      </div>
+
+      {/* Row 2: Control Panels */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mb-8">
+        {/* 回合控制 */}
+        <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-blue-500 flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-zinc-300">回合控制面板</h3>
+              <span className="text-sm font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded">第 {data.board.current_round} 回合</span>
+            </div>
+            <p className="text-xs text-zinc-500 mb-4">點擊「下一回合」會推進股價、結算所有借款利息（單條批次 SQL）。30 秒節流。</p>
+            <button
+              onClick={handleTick}
+              disabled={busy || data.scoring.enabled}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)] mb-3 min-h-[44px]"
+            >
+              {busy ? '處理中…' : '推進下一回合'}
+            </button>
+            {data.board.last_tick_at && (
+              <p className="text-xs text-zinc-500 text-center">
+                上次：{new Date(data.board.last_tick_at).toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* 跑馬燈 */}
+        <div className="glass-panel p-6 rounded-2xl flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-zinc-300 mb-4">即時跑馬燈廣播</h3>
+            <textarea
+              value={marqueeText}
+              onChange={(e) => setMarqueeText(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-zinc-200 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 resize-none h-24 mb-3"
+              placeholder="輸入要顯示在大屏幕的突發訊息..."
+            />
+            <div className="flex items-center gap-2 mb-3 text-xs text-zinc-500">
+              <span>TTL（分鐘）</span>
+              <input
+                type="number"
+                min="1"
+                value={marqueeMins}
+                onChange={(e) => setMarqueeMins(Number(e.target.value) || 60)}
+                className="w-20 bg-zinc-900 border border-zinc-700 rounded p-1 text-zinc-200 text-center"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handlePublishMarquee}
+              disabled={busy || !marqueeText.trim()}
+              className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-bold py-2 rounded-lg transition-colors shadow-[0_0_15px_rgba(245,158,11,0.2)] min-h-[40px]"
+            >
+              發送至看板
+            </button>
+            <button
+              onClick={handleClearMarquee}
+              disabled={busy}
+              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-4 py-2 rounded-lg transition-colors border border-zinc-700 min-h-[40px]"
+            >
+              清除
+            </button>
+          </div>
+        </div>
+
+        {/* 換匯所即時權重 */}
+        <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-teal-500 flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-zinc-300 mb-4 flex items-center justify-between gap-2">
+              <span>換匯所即時權重控制</span>
+              <span className="text-xs bg-teal-500/20 text-teal-400 px-2 py-1 rounded border border-teal-500/30 font-mono shadow-[0_0_10px_rgba(20,184,166,0.2)]">
+                目前套用：{formatMultiplier(currentMultiplier)}
+              </span>
+            </h3>
+
+            <div className="flex justify-between gap-1 mb-4">
+              {PRESET_MULTIPLIERS.map((p) => {
+                const isActive = Math.abs(currentMultiplier - p.value) < 0.01;
+                return (
+                  <button
+                    key={p.label}
+                    onClick={() => handleSetMultiplier(p.value)}
+                    disabled={busy}
+                    className={`flex-1 py-1.5 text-xs rounded border transition-all min-h-[36px] ${
+                      isActive
+                        ? 'bg-teal-500 text-zinc-950 font-bold border-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.4)]'
+                        : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+              <button
+                onClick={handleCustomMultiplier}
+                disabled={busy}
+                className="flex-1 py-1.5 text-xs rounded border bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200 min-h-[36px]"
+              >
+                自訂
+              </button>
+            </div>
+
+            <div className="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50 mb-4">
+              <p className="text-xs text-zinc-400 leading-relaxed text-center">
+                所有福報兌換金錢的方案，目前自動套用{' '}
+                <strong className="text-teal-400 font-bold">{(currentMultiplier * 100).toFixed(0)}%</strong>{' '}
+                的倍率轉換。
+              </p>
+            </div>
+          </div>
+
+          <Link
+            href="/admin/finance"
+            className="block w-full text-center bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg transition-colors border border-zinc-700 text-sm mt-auto min-h-[40px] flex items-center justify-center"
+          >
+            管理基礎兌換方案與銀行規則
+          </Link>
         </div>
       </div>
 
-      {/* 排行榜 */}
-      <div className="glass-panel rounded-2xl overflow-hidden">
-        <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2">
-          <Trophy className="w-5 h-5 text-amber-500" />
-          <h3 className="text-lg font-bold text-zinc-100">即時排行榜（前 50 名）</h3>
+      {/* Row 3: Leaderboard */}
+      <div className="glass-panel rounded-2xl p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-lg font-semibold text-zinc-300 flex items-center gap-2">
+            <Users className="w-5 h-5 text-amber-500" /> 財富排行榜
+            <span className="text-xs text-zinc-500 font-normal">（前 {data.leaderboard.length} 名）</span>
+          </h3>
+          <button
+            onClick={() => busyTransition(reload)}
+            disabled={busy}
+            className="text-zinc-500 hover:text-amber-400 text-xs flex items-center gap-1"
+          >
+            <RefreshCw className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} />
+            重新整理
+          </button>
         </div>
-        <table className="w-full text-left">
-          <thead>
-            <tr className="text-zinc-500 text-xs border-b border-zinc-800">
-              <th className="p-4">名次</th>
-              <th className="p-4">玩家</th>
-              <th className="p-4 text-right">最終分數</th>
-              <th className="p-4 text-right">金錢</th>
-              <th className="p-4 text-right">福分</th>
-              <th className="p-4 text-right">健康</th>
-              <th className="p-4 text-right">業力</th>
-              <th className="p-4 text-right">重生</th>
-            </tr>
-          </thead>
-          <tbody className="text-zinc-200 text-sm">
-            {data.leaderboard.map((row, idx) => (
-              <tr key={row.user_id} className="border-b border-zinc-800/50">
-                <td className="p-4 font-bold text-amber-400">#{idx + 1}</td>
-                <td className="p-4">
-                  <div className="font-medium">{row.name}</div>
-                  <div className="text-xs text-zinc-500 font-mono">{row.user_id}</div>
-                </td>
-                <td className="p-4 text-right font-mono text-amber-300">{row.final_score?.toLocaleString() ?? 0}</td>
-                <td className="p-4 text-right text-amber-400">{row.money?.toLocaleString() ?? 0}</td>
-                <td className="p-4 text-right text-teal-400">{row.blessing ?? 0}</td>
-                <td className="p-4 text-right text-rose-400">{row.health ?? 0}</td>
-                <td className="p-4 text-right text-purple-400">{row.karma ?? 0}</td>
-                <td className="p-4 text-right text-zinc-500 text-xs">×{row.rebirth_count ?? 0}</td>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-zinc-500 text-sm border-b border-zinc-800">
+                <th className="pb-3 pl-2">排名</th>
+                <th className="pb-3">姓名</th>
+                <ColTh title="金錢" color="amber" />
+                <ColTh title="福份" color="teal" />
+                <ColTh title="健康" color="rose" />
+                <ColTh title="業力" color="purple" />
+                <ColTh title="重生次數" color="zinc" />
+                <ColTh title="最終分數" color="white" />
               </tr>
-            ))}
-            {data.leaderboard.length === 0 && (
-              <tr><td colSpan={8} className="p-12 text-center text-zinc-500">尚無玩家</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="text-zinc-200 text-sm">
+              {data.leaderboard.length === 0 ? (
+                <tr><td colSpan={8} className="py-8 text-center text-zinc-500">尚無玩家資料</td></tr>
+              ) : (
+                data.leaderboard.map((row, i) => (
+                  <tr key={row.user_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
+                    <td className="py-4 pl-2 font-bold text-amber-500">#{i + 1}</td>
+                    <td className="py-4 font-medium">
+                      {row.name}
+                      <span className="text-xs text-zinc-500 ml-2 font-mono">{row.user_id}</span>
+                    </td>
+                    <td className="py-4 text-right font-bold text-amber-400">{row.money?.toLocaleString() ?? 0}</td>
+                    <td className="py-4 text-right text-teal-400 font-medium">{row.blessing ?? 0}</td>
+                    <td className="py-4 text-right text-rose-400 font-medium">{row.health ?? 0}</td>
+                    <td className="py-4 text-right text-purple-400 font-medium">{row.karma ?? 0}</td>
+                    <td className="py-4 text-right text-zinc-400">{row.rebirth_count ?? 0}</td>
+                    <td className="py-4 pr-2 text-right font-bold text-zinc-100">{row.final_score?.toLocaleString() ?? 0}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {toast && (
@@ -206,11 +439,44 @@ export default function AdminDashboardClient({ initial }: Props) {
   );
 }
 
-function CountCard({ icon, label, value, href }: { icon: React.ReactNode; label: string; value: number; href: string }) {
+function KPICard({ title, value, alert = false, alertText }: { title: string; value: string; alert?: boolean; alertText?: string }) {
   return (
-    <Link href={href} className="glass-panel p-4 rounded-xl hover:border-amber-500/40 transition-colors">
-      <div className="flex items-center gap-2 text-zinc-500 text-xs">{icon}<span>{label}</span></div>
-      <div className="text-2xl font-bold text-zinc-100 mt-1">{value}</div>
-    </Link>
+    <div className={`glass-panel p-6 rounded-xl ${alert ? 'border border-rose-500/50 shadow-[0_0_15px_rgba(225,29,72,0.3)]' : ''}`}>
+      <h3 className={`text-sm font-medium mb-1 ${alert ? 'text-rose-400 animate-pulse' : 'text-zinc-500'}`}>
+        {title} {alert && alertText && `⚠️ ${alertText}`}
+      </h3>
+      <p className={`text-3xl font-bold ${alert ? 'text-rose-500 animate-pulse' : 'text-zinc-100'}`}>{value}</p>
+    </div>
   );
+}
+
+function ColTh({ title, color }: { title: string; color: string }) {
+  const map: Record<string, string> = {
+    amber: 'hover:text-amber-500',
+    teal: 'hover:text-teal-500',
+    rose: 'hover:text-rose-500',
+    purple: 'hover:text-purple-500',
+    zinc: 'hover:text-zinc-300',
+    white: 'hover:text-white',
+  };
+  return (
+    <th className={`pb-3 text-right ${map[color] ?? ''} group transition-colors`}>
+      <div className="flex items-center justify-end gap-1">{title} <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-100" /></div>
+    </th>
+  );
+}
+
+function formatMultiplier(v: number): string {
+  const pct = (v - 1) * 100;
+  if (Math.abs(pct) < 0.5) return '+0%';
+  return pct > 0 ? `+${pct.toFixed(0)}%` : `${pct.toFixed(0)}%`;
+}
+
+function formatElapsed(ms: number): string {
+  if (ms <= 0) return '00:00:00';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
