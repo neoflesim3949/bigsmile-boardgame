@@ -130,7 +130,7 @@ export async function tickRound(): Promise<
     });
 
     revalidatePath('/admin');
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     revalidatePath('/display/board');
     return ok({ round: tx1, players_settled: tx2 });
   } catch (err) {

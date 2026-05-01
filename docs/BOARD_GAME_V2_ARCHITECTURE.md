@@ -430,8 +430,7 @@
 | `/admin/stocks` | 管理員 | 股市商品列表（≤ 10 檔）+ **股市大盤回合腳本總表**（每回合 × 每檔股票的 % 或 $ 變動 + 事件跑馬燈，推進回合時自動套用） |
 | `/admin/stocks/[id]` | 管理員 | 單一股票歷史價格曲線（read-only；編輯走列表頁 modal） |
 | `/admin/items` | 管理員 | 道具定義 CRUD |
-| `/admin/events` | 管理員 | 三合一頁：劇情事件排程 CRUD + 看板畫面設定（主標題、重點商品、配色）+ Display Token 管理 |
-| `/admin/board` | (deprecated) | 路由仍存在以避免外連結失效，但功能已併入 `/admin/events`；建議所有看板相關操作走 `/admin/events` |
+| `/admin/events` | 管理員 | 三合一頁：劇情事件排程 CRUD + 看板畫面設定（主標題、重點商品、配色、輪播秒數）+ Display Token 管理（發行 / 撤銷） |
 | `/admin/finance` | 管理員 | 財務設定（換匯所方案、銀行借貸規則） |
 | `/admin/settings` | 管理員 | 參數設定頁，6 個 section：**數值顯示**（ShowAllStats）、**最終計分權重**（3 weights）、**預設新手初始值**（4 nums）、**重生後初始值**（4 nums）、**新手命格範本池**（CRUD）、**危險操作區**（5 按鈕 × 3 次確認）。**不含活動時間 / 匯率 / 銀行**（這些在別處：活動時間旗標走 `/admin` dashboard 工具列；換匯倍率走 `/admin` 控制台；換匯方案與銀行借貸方案走 `/admin/finance`） |
 | `/captain` | 關主 | 關主後台首頁（巨大掃碼入口 + 快捷模組列表） |
@@ -445,7 +444,7 @@
 | `/transfer` | 玩家 | 玩家轉帳（輸入完整 ID 或 QR 掃碼查詢後轉帳） |
 | `/history/[type]` | 玩家 | 四項數值明細（type = `money` / `health` / `blessing` / `karma`）；福分 / 業力受 `ShowAllStats` 與 `BoardConfig.final_scoring_triggered_at` 雙重控管 |
 | `/settings` | 玩家 | 玩家個人偏好設定（字體大小、深色 / 淺色模式，設定值存於 localStorage，預設深色模式） |
-| `/display/board` | 活動看板 | 公開展示行情、事件、跑馬燈（需 display token，無互動，**永遠深色強制**） |
+| `/display/board` | 活動看板 | 公開展示，需 display token，**永遠深色強制**，pointer-events-none 防誤觸。版型分四區：(1) **Header（10vh）**：logo + 標題 + 第 N 回合 + 時鐘 (HH:MM:SS \| MM/DD) + 已連線 + 「展開最終榜單」toggle 按鈕；(2) **左欄（25%）「重點趨勢」**：最多 2 檔 featured 商品大卡片含 canvas sparkline；(3) **中欄（flex-1）「大會行情總表」**：所有 visible 商品列表（代碼/名稱、價格、漲跌 % + 箭頭）；(4) **右欄（25%）「大富翁風雲榜」**：前 10 名（rank 1-3 有金/銀/銅獎牌）；(5) **Footer（15vh）**：上半「大會事件」事件輪播、下半「跑馬燈公告」滾動。**最終結算模式**：左 + 中欄隱藏，右欄擴展為全寬，欄位展開為「金錢/福分/健康/業力/重生次數/最終分數」 |
 
 > 採用 Next.js App Router，每個頁面為獨立 route，不使用全屏疊層彈窗的進入模式。
 > middleware 依 `Account.role` 強制路由保護：非 admin 不能進 `/admin/*`、非 captain 不能進 `/captain/*`、非 player 不能進 `/`、`/stock`。
@@ -540,7 +539,6 @@ src/app/
 │   ├── stocks/[id]/page.tsx       # 單檔股票歷史價格曲線（read-only）
 │   ├── items/page.tsx             # 道具定義 CRUD
 │   ├── events/page.tsx            # 三合一：事件 CRUD + 看板畫面設定 + display token
-│   ├── board/page.tsx             # (deprecated) 已併入 events，路由保留以避免外連結失效
 │   ├── finance/page.tsx           # 換匯所方案 + 銀行借貸方案
 │   └── settings/page.tsx          # 6 區塊：顯示 / 計分權重 / 新手 / 重生 / 範本池 / 危險區
 ├── display/board/page.tsx         # 活動看板（強制深色，display token 授權）

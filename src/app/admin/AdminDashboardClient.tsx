@@ -220,8 +220,9 @@ export default function AdminDashboardClient({ initial }: Props) {
           )}
 
           <Link
-            href="/admin/board"
+            href="/admin/events"
             className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-zinc-700 flex items-center gap-2 min-h-[40px]"
+            title="到事件與看板管理頁發 display token"
           >
             <MonitorPlay className="w-4 h-4" /> 開啟活動看板
           </Link>

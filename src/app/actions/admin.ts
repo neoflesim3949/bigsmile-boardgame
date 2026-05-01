@@ -1035,7 +1035,7 @@ export async function publishMarquee(text: string, ttlMinutes: number): Promise<
       [text.slice(0, 200), useMins],
     );
     revalidatePath('/admin/events');
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     return ok(null);
   } catch (err) {
     return fail(err);
@@ -1049,7 +1049,7 @@ export async function clearMarquee(): Promise<ActionResult<null>> {
       `UPDATE "BoardConfig" SET marquee_text='', marquee_until=NULL, updated_at=now() WHERE id=1`,
     );
     revalidatePath('/admin/events');
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     return ok(null);
   } catch (err) {
     return fail(err);
@@ -1109,7 +1109,7 @@ export async function updateBoardConfig(p: z.infer<typeof boardConfigSchema>): P
                  marquee_text, marquee_until, final_scoring_triggered_at, current_round, last_tick_at`,
       [data.title, data.featured_stock_ids, data.color_scheme, data.event_rotate_seconds],
     );
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     return ok(r.rows[0]);
   } catch (err) {
     return fail(err);
@@ -1133,7 +1133,7 @@ export async function issueDisplayToken(label: string, ttlDays: number): Promise
        RETURNING expires_at`,
       [jti, label.slice(0, 100), ttlSeconds, session.userId],
     );
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     return ok({ token, jti, expires_at: r.rows[0].expires_at });
   } catch (err) {
     return fail(err);
@@ -1147,7 +1147,7 @@ export async function revokeDisplayToken(jti: string): Promise<ActionResult<null
       `UPDATE "DisplayToken" SET revoked_at = now() WHERE jti = $1 AND revoked_at IS NULL`,
       [jti],
     );
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     return ok(null);
   } catch (err) {
     return fail(err);
@@ -1362,7 +1362,7 @@ export async function triggerFinalScoring(): Promise<ActionResult<{ triggered_at
       return upd.rows[0].final_scoring_triggered_at;
     });
     revalidatePath('/admin');
-    revalidatePath('/admin/board');
+    revalidatePath('/admin/events');
     return ok({ triggered_at: r });
   } catch (err) {
     return fail(err);
