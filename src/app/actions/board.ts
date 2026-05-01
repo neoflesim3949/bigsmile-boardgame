@@ -120,21 +120,28 @@ export async function getBoardData(token: string): Promise<ActionResult<BoardDat
          WHERE key IN ('ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma')`,
       );
       const sm = new Map(settings.rows.map((r) => [r.key, r.value] as const));
-      const wM = Number(sm.get('ScoreWeightMoney') ?? '0.05');
-      const wB = Number(sm.get('ScoreWeightBlessing') ?? '200');
-      const wK = Number(sm.get('ScoreWeightKarma') ?? '150');
-      const lb = await query<NonNullable<BoardData['finalLeaderboard']>[number]>(
-        `SELECT a.user_id, a.name,
-                ps.money, ps.blessing, ps.health, ps.karma, ps.rebirth_count,
-                ROUND(ps.money * $1 + ps.blessing * $2 - ps.karma * $3)::int AS final_score
+      const wM = Number(sm.get('ScoreWeightMoney') ?? '0.05') || 0;
+      const wB = Number(sm.get('ScoreWeightBlessing') ?? '200') || 0;
+      const wK = Number(sm.get('ScoreWeightKarma') ?? '150') || 0;
+      // 計分搬到 JS 端（避免 PG 對 int * float-text-param 的 cast 推導失敗）
+      const lbRaw = await query<{
+        user_id: string; name: string;
+        money: number; blessing: number; health: number; karma: number;
+        rebirth_count: number;
+      }>(
+        `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.health, ps.karma, ps.rebirth_count
          FROM "Account" a
          JOIN "PlayerStats" ps ON ps.user_id = a.user_id
          WHERE a.role = 'player' AND a.is_active = true
-         ORDER BY final_score DESC NULLS LAST
-         LIMIT 100`,
-        [wM, wB, wK],
+         LIMIT 500`,
       );
-      finalLeaderboard = lb.rows;
+      finalLeaderboard = lbRaw.rows
+        .map((r) => ({
+          ...r,
+          final_score: Math.round(r.money * wM + r.blessing * wB - r.karma * wK),
+        }))
+        .sort((a, b) => b.final_score - a.final_score)
+        .slice(0, 100);
     }
 
     return ok({
