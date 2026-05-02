@@ -512,18 +512,17 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
 }
 
 // ─────────────────────────────────────────────────────────────
-// 銀行借貸
+// 銀行借貸（合約化：每筆借款一張獨立 row、可指定還哪一張、利息按 balance/principal 比例）
+//
+// **CLAUDE.md §6.2 / §3 規則**：銀行 / 借貸前台禁止顯示「福分 / 福報」相關訊息。
+// 錯誤訊息與 UI 一律以「單位（unit）」表達。後端可自由運用 blessing_collateral 算抵押。
 // ─────────────────────────────────────────────────────────────
 export interface BankLoanOptionViewPlayer {
   id: string;
   label: string;
   money_per_unit: number;
   interest_money_per_round: number;
-  /** 此方案最高可借總單位（依目前福報計算） */
-  max_total_units: number;
-  /** 已持有單位 */
-  current_units: number;
-  /** 本次可新增單位（max - current，下限 0） */
+  /** 本次最多可借多少單位（依目前抵押容量計算；不顯示計算過程） */
   available_units: number;
 }
 
@@ -535,36 +534,56 @@ export async function listBankLoanOptionsForPlayer(): Promise<ActionResult<BankL
       blessing_collateral_per_unit: number; money_per_unit: number;
       interest_money_per_round: number;
       blessing: number;
-      current_units: number;
     }>(
       `SELECT blo.id, blo.label,
               blo.blessing_collateral_per_unit, blo.money_per_unit, blo.interest_money_per_round,
-              ps.blessing,
-              COALESCE(pl.units, 0) AS current_units
+              ps.blessing
        FROM "BankLoanOption" blo
        CROSS JOIN "PlayerStats" ps
-       LEFT JOIN "PlayerLoan" pl ON pl.loan_option_id = blo.id AND pl.user_id = ps.user_id
        WHERE blo.is_active = true AND ps.user_id = $1
        ORDER BY blo.display_order ASC, blo.label ASC`,
       [session.userId],
     );
-    const out = r.rows.map((row) => {
-      // spec：最高可借總單位 = floor(當前福報 / 每單位抵押福報)。
-      // 福分若中途下跌可能讓 max < current（額度倒掛），current 不會被強制結清，但 available = 0
-      const maxStrict = Math.floor(row.blessing / row.blessing_collateral_per_unit);
-      const current = row.current_units;
-      const available = Math.max(0, maxStrict - current);
-      return {
-        id: row.id,
-        label: row.label,
-        money_per_unit: row.money_per_unit,
-        interest_money_per_round: row.interest_money_per_round,
-        max_total_units: Math.max(maxStrict, current),
-        current_units: current,
-        available_units: available,
-      };
-    });
+    const out = r.rows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      money_per_unit: row.money_per_unit,
+      interest_money_per_round: row.interest_money_per_round,
+      // 用「可借單位」表達（前台不揭露 blessing 計算過程）
+      available_units: Math.max(0, Math.floor(row.blessing / row.blessing_collateral_per_unit)),
+    }));
     return ok(out);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** 玩家當前未還清的合約。每筆是一張獨立合約，可被個別還款。 */
+export interface ActiveLoanContract {
+  id: string;
+  loan_label: string;
+  principal: number;
+  balance: number;
+  borrowed_at: string;
+  base_interest_money_per_round: number;
+  base_interest_blessing_per_round: number;
+  /** 下回合預估扣金錢（按 balance/principal 比例 round） */
+  next_interest_money: number;
+}
+
+export async function listMyActiveLoans(): Promise<ActionResult<ActiveLoanContract[]>> {
+  try {
+    const session = await requireRole('player');
+    const r = await query<ActiveLoanContract>(
+      `SELECT id, loan_label, principal, balance, borrowed_at,
+              base_interest_money_per_round, base_interest_blessing_per_round,
+              ROUND(base_interest_money_per_round * balance::numeric / principal)::int AS next_interest_money
+       FROM "PlayerLoan"
+       WHERE user_id = $1 AND balance > 0
+       ORDER BY borrowed_at ASC`,
+      [session.userId],
+    );
+    return ok(r.rows);
   } catch (err) {
     return fail(err);
   }
@@ -575,7 +594,11 @@ const borrowSchema = z.object({
   units: z.number().int().positive(),
 });
 
-export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Promise<ActionResult<{ borrowed_money: number; new_balance: { money: number; bank_loan: number } }>> {
+export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Promise<ActionResult<{
+  borrowed_money: number;
+  loan_id: string;
+  new_balance: { money: number; bank_loan: number };
+}>> {
   try {
     const session = await requireRole('player');
     const data = borrowSchema.parse(payload);
@@ -584,14 +607,19 @@ export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Pro
       await assertNotDuringFinalScoring(client);
       await assertNotTourMode(client);
       const opt = await client.query<{
+        label: string;
         blessing_collateral_per_unit: number;
         money_per_unit: number;
+        interest_money_per_round: number;
+        interest_blessing_per_round: number;
       }>(
-        `SELECT blessing_collateral_per_unit, money_per_unit
+        `SELECT label, blessing_collateral_per_unit, money_per_unit,
+                interest_money_per_round, interest_blessing_per_round
          FROM "BankLoanOption" WHERE id = $1 AND is_active = true`,
         [data.optionId],
       );
       if (opt.rows.length === 0) throw new ActionError('NOT_FOUND', '借貸方案不存在或已停用');
+      const o = opt.rows[0];
 
       const stats = await client.query<{ money: number; health: number; blessing: number; bank_loan: number }>(
         `SELECT money, health, blessing, bank_loan FROM "PlayerStats" WHERE user_id = $1 FOR UPDATE`,
@@ -601,43 +629,57 @@ export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Pro
       if (!me) throw new ActionError('NOT_FOUND', '');
       assertPlayerAlive(me);
 
-      const cur = await client.query<{ units: number }>(
-        `SELECT COALESCE(units, 0) AS units FROM "PlayerLoan" WHERE user_id = $1 AND loan_option_id = $2`,
-        [session.userId, data.optionId],
-      );
-      const currentUnits = cur.rows[0]?.units ?? 0;
-      const maxTotal = Math.floor(me.blessing / opt.rows[0].blessing_collateral_per_unit);
-      const available = Math.max(0, maxTotal - currentUnits);
+      // 抵押容量檢查：以 floor(blessing / collateral_per_unit) 為當下最大可借單位
+      // 錯誤訊息只暴露「單位」（前台不揭露 blessing 計算過程）
+      const available = Math.max(0, Math.floor(me.blessing / o.blessing_collateral_per_unit));
       if (data.units > available) {
-        throw new ActionError('INVALID_INPUT', `額度不足（可借 ${available} 單位）`);
+        throw new ActionError('INVALID_INPUT', `額度不足（本次最多可借 ${available} 單位）`);
       }
 
-      const moneyDelta = data.units * opt.rows[0].money_per_unit;
+      const blessingNeeded = data.units * o.blessing_collateral_per_unit;
+      const principal = data.units * o.money_per_unit;
+      const baseMoneyInterest = data.units * o.interest_money_per_round;
+      const baseBlessingInterest = data.units * o.interest_blessing_per_round;
+
+      // 後端靜默扣抵押 blessing；前端不會看到此扣除（CLAUDE.md §6.2）
       const updPS = await client.query<{ money: number; bank_loan: number }>(
         `UPDATE "PlayerStats"
-         SET money = money + $2, bank_loan = bank_loan + $2,
+         SET money = money + $2,
+             bank_loan = bank_loan + $2,
+             blessing = blessing - $3,
              loan_updated_at = COALESCE(loan_updated_at, now()),
              updated_at = now()
          WHERE user_id = $1
          RETURNING money, bank_loan`,
-        [session.userId, moneyDelta],
+        [session.userId, principal, blessingNeeded],
       );
 
-      await client.query(
-        `INSERT INTO "PlayerLoan" (user_id, loan_option_id, units)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (user_id, loan_option_id) DO UPDATE SET
-           units = "PlayerLoan".units + EXCLUDED.units,
-           updated_at = now()`,
-        [session.userId, data.optionId, data.units],
+      const ins = await client.query<{ id: string }>(
+        `INSERT INTO "PlayerLoan"
+           (user_id, loan_option_id, loan_label, principal, balance,
+            blessing_paid_at_borrow, base_interest_money_per_round, base_interest_blessing_per_round)
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7)
+         RETURNING id`,
+        [session.userId, data.optionId, o.label, principal, blessingNeeded, baseMoneyInterest, baseBlessingInterest],
       );
 
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
          VALUES ($1, $1, 'bank_borrow', $2)`,
-        [session.userId, JSON.stringify({ option_id: data.optionId, units: data.units, money_delta: moneyDelta })],
+        [session.userId, JSON.stringify({
+          loan_id: ins.rows[0].id,
+          loan_label: o.label,
+          option_id: data.optionId,
+          units: data.units,
+          principal,
+          base_interest_money: baseMoneyInterest,
+        })],
       );
-      return { borrowed_money: moneyDelta, new_balance: updPS.rows[0] };
+      return {
+        borrowed_money: principal,
+        loan_id: ins.rows[0].id,
+        new_balance: { money: updPS.rows[0].money, bank_loan: updPS.rows[0].bank_loan },
+      };
     });
 
     revalidatePath('/bank');
@@ -648,9 +690,18 @@ export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Pro
   }
 }
 
-const repaySchema = z.object({ amount: z.number().int().positive() });
+const repaySchema = z.object({
+  loanId: z.uuid(),
+  amount: z.number().int().positive(),
+});
 
-export async function repayBank(payload: z.infer<typeof repaySchema>): Promise<ActionResult<{ new_balance: { money: number; bank_loan: number } }>> {
+export async function repayBank(payload: z.infer<typeof repaySchema>): Promise<ActionResult<{
+  loan_id: string;
+  amount_repaid: number;
+  loan_balance_after: number;
+  loan_paid_off: boolean;
+  new_balance: { money: number; bank_loan: number };
+}>> {
   try {
     const session = await requireRole('player');
     const data = repaySchema.parse(payload);
@@ -666,27 +717,67 @@ export async function repayBank(payload: z.infer<typeof repaySchema>): Promise<A
       if (!me) throw new ActionError('NOT_FOUND', '');
       assertPlayerAlive(me);
 
-      const repay = Math.min(data.amount, me.bank_loan);
-      if (repay <= 0) throw new ActionError('INVALID_INPUT', '無待還款項');
-      if (me.money < repay) throw new ActionError('INSUFFICIENT_FUNDS', '金錢不足');
+      // 鎖該合約 row（防同筆雙重還）
+      const loan = await client.query<{ balance: number; principal: number; loan_label: string }>(
+        `SELECT balance, principal, loan_label FROM "PlayerLoan"
+         WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+        [data.loanId, session.userId],
+      );
+      if (loan.rows.length === 0) throw new ActionError('NOT_FOUND', '借款合約不存在');
+      const c = loan.rows[0];
+      if (c.balance <= 0) throw new ActionError('INVALID_INPUT', '此合約已還清');
 
+      const repay = Math.min(data.amount, c.balance, me.money);
+      if (repay <= 0) throw new ActionError('INSUFFICIENT_FUNDS', '金錢不足以還款');
+
+      const newBalance = c.balance - repay;
+      const paidOff = newBalance === 0;
+
+      await client.query(
+        `UPDATE "PlayerLoan"
+         SET balance = $2,
+             paid_off_at = CASE WHEN $2 = 0 THEN now() ELSE paid_off_at END,
+             updated_at = now()
+         WHERE id = $1`,
+        [data.loanId, newBalance],
+      );
+
+      // 若這是最後一張未還清的合約，把 PlayerStats.loan_updated_at 清掉
       const upd = await client.query<{ money: number; bank_loan: number }>(
         `UPDATE "PlayerStats"
          SET money = money - $2,
              bank_loan = bank_loan - $2,
-             loan_updated_at = CASE WHEN bank_loan - $2 = 0 THEN NULL ELSE loan_updated_at END,
+             loan_updated_at = CASE
+               WHEN $4::boolean AND NOT EXISTS (
+                 SELECT 1 FROM "PlayerLoan" WHERE user_id = $1 AND balance > 0 AND id <> $3
+               ) THEN NULL
+               ELSE loan_updated_at
+             END,
              updated_at = now()
          WHERE user_id = $1
          RETURNING money, bank_loan`,
-        [session.userId, repay],
+        [session.userId, repay, data.loanId, paidOff],
       );
 
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
          VALUES ($1, $1, 'bank_repay', $2)`,
-        [session.userId, JSON.stringify({ amount: repay })],
+        [session.userId, JSON.stringify({
+          loan_id: data.loanId,
+          loan_label: c.loan_label,
+          amount: repay,
+          loan_balance_after: newBalance,
+          loan_paid_off: paidOff,
+        })],
       );
-      return { new_balance: upd.rows[0] };
+
+      return {
+        loan_id: data.loanId,
+        amount_repaid: repay,
+        loan_balance_after: newBalance,
+        loan_paid_off: paidOff,
+        new_balance: upd.rows[0],
+      };
     });
 
     revalidatePath('/bank');

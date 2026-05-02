@@ -379,18 +379,32 @@
 | `is_active` | BOOLEAN | 是否啟用 |
 | `created_at` | TIMESTAMPTZ | |
 
-#### `PlayerLoan` — 玩家當前借貸（多方案）
+#### `PlayerLoan` — 玩家借貸合約（每筆借款獨立 row，可個別還款）
 | 欄位 | 型別 | 說明 |
 |------|------|------|
+| `id` | UUID PK | 合約 ID |
 | `user_id` | TEXT FK→Account | |
-| `loan_option_id` | UUID FK→BankLoanOption | |
-| `units` | INTEGER `≥ 0` | 借入單位數 |
-| `borrowed_at` | TIMESTAMPTZ | 首次借的時間 |
+| `loan_option_id` | UUID FK→BankLoanOption ON DELETE SET NULL | option 被刪不影響歷史合約 |
+| `loan_label` | TEXT | 借款當下的方案名稱（凍結） |
+| `principal` | INTEGER `> 0` | 借款本金（金錢） |
+| `balance` | INTEGER `≥ 0` | 剩餘本金；`balance = 0` 視為還清 |
+| `blessing_paid_at_borrow` | INTEGER `≥ 0` | 借款當下扣的福分（已扣，記錄用） |
+| `base_interest_money_per_round` | INTEGER `≥ 0` | 完整本金時的金錢利息（凍結） |
+| `base_interest_blessing_per_round` | INTEGER `≥ 0` | 完整本金時的福分扣（凍結） |
+| `borrowed_at` | TIMESTAMPTZ | |
+| `paid_off_at` | TIMESTAMPTZ NULL | balance 歸零的時間 |
 | `updated_at` | TIMESTAMPTZ | |
-| **PK** | | (`user_id`, `loan_option_id`) |
 
-> 玩家可同時持有多筆不同方案的借款。`PlayerStats.bank_loan` 仍保留為「當前所有借款的金錢餘額總和」cache（每次 borrow / repay / tickRound 結算時同步更新），方便讀取顯示。
-> 額度計算：「此方案最高可借總單位 = `FLOOR(當前福報 / blessing_collateral_per_unit)`；本次可新增單位 = `MAX(0, 最高 - 已持有單位)`」。
+> **每次 borrow → INSERT 一張新合約 row**（不再用 ON CONFLICT UPSERT 累加 units）。Schema 設計理由：原本的 PRIMARY KEY (user_id, loan_option_id) 設計造成「還款只動 PlayerStats.bank_loan、PlayerLoan.units 沒同步」的 bug，導致還清後仍持續被結算利息。
+>
+> **利息結算（tickRound Tx2）**：對每張 `balance > 0` 的合約 → `ROUND(base_interest_money * balance::numeric / principal)::int` 個別算金錢利息、`ROUND(base_interest_blessing * balance::numeric / principal)::int` 個別算福分扣。SUM by user_id 一次更新 PlayerStats，每張合約寫一筆 `bank_interest` Transaction（payload 含 loan_id / loan_label / balance / principal）方便歷史追蹤。
+>
+> **部分還款**：`repayBank({ loanId, amount })` 只減該合約 balance，下回合利息按比例自動降。例：本金 100、利息每回合 10，還 30 後 balance=70，下回合利息 = ROUND(10 × 70/100) = 7。
+>
+> **抵押容量**：每次借入需扣 `units * blessing_collateral_per_unit` 福分（前台不揭露此計算）。錯誤訊息只暴露「單位」例：「額度不足（本次最多可借 N 單位）」，**禁止**講「福分不足」。
+>
+> `PlayerStats.bank_loan` 仍保留為「所有未還清合約 balance 總和」的 cache，每次 borrow / repay 同步更新。利息結算**不**動 bank_loan（利息扣的是 money / blessing，本金不變）。
+>
 > 重生時 `DELETE FROM PlayerLoan WHERE user_id = $userId`，同步 `PlayerStats.bank_loan = 0` / `loan_updated_at = NULL`。
 
 #### `DisplayToken` — 活動看板存取憑證

@@ -97,34 +97,54 @@ export async function tickRound(): Promise<
       return newRound;
     });
 
-    // ─── Tx 2：借款利息結算（批次 SQL，不逐筆 loop）───
+    // ─── Tx 2：借款利息結算（按合約 balance/principal 比例）───
     const tx2 = await withTx(async (client) => {
-      // 用單條 SQL：UPDATE PlayerStats 同時扣金錢與福分（依 PlayerLoan + BankLoanOption 聚合）
-      // 並把結算量寫進 Transaction（INSERT...SELECT）
+      // 算法：每張未還清合約 → ROUND(base_interest * balance / principal) 個別利息
+      //      → SUM by user_id 一次扣 PlayerStats.money / blessing
+      //      → 每張合約寫一筆 'bank_interest' Transaction（含 loan_id 方便歷史追蹤）
       const settled = await client.query<{ user_id: string }>(
-        `WITH owed AS (
-           SELECT pl.user_id,
-                  SUM(pl.units * blo.interest_money_per_round) AS money_due,
-                  SUM(pl.units * blo.interest_blessing_per_round) AS blessing_due
+        `WITH per_loan AS (
+           SELECT pl.id AS loan_id,
+                  pl.user_id,
+                  pl.loan_label,
+                  pl.balance,
+                  pl.principal,
+                  ROUND(pl.base_interest_money_per_round * pl.balance::numeric / pl.principal)::int AS money_due,
+                  ROUND(pl.base_interest_blessing_per_round * pl.balance::numeric / pl.principal)::int AS blessing_due
            FROM "PlayerLoan" pl
-           JOIN "BankLoanOption" blo ON blo.id = pl.loan_option_id
-           WHERE pl.units > 0
-           GROUP BY pl.user_id
+           WHERE pl.balance > 0
          ),
-         updated AS (
+         agg AS (
+           SELECT user_id, SUM(money_due)::int AS money_due, SUM(blessing_due)::int AS blessing_due
+           FROM per_loan
+           GROUP BY user_id
+         ),
+         updated_ps AS (
            UPDATE "PlayerStats" ps
-             SET money = ps.money - o.money_due,
-                 blessing = GREATEST(0, ps.blessing - o.blessing_due),
+             SET money = ps.money - a.money_due,
+                 blessing = GREATEST(0, ps.blessing - a.blessing_due),
                  loan_updated_at = now(),
                  updated_at = now()
-           FROM owed o
-           WHERE ps.user_id = o.user_id
-           RETURNING ps.user_id, o.money_due, o.blessing_due
+             FROM agg a
+             WHERE ps.user_id = a.user_id
+             RETURNING ps.user_id
+         ),
+         logged AS (
+           INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+           SELECT pl.user_id, NULL, 'bank_interest',
+                  jsonb_build_object(
+                    'loan_id', pl.loan_id,
+                    'loan_label', pl.loan_label,
+                    'balance', pl.balance,
+                    'principal', pl.principal,
+                    'money_due', pl.money_due,
+                    'blessing_due', pl.blessing_due
+                  )
+           FROM per_loan pl
+           JOIN updated_ps u ON u.user_id = pl.user_id
+           RETURNING user_id
          )
-         INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
-         SELECT user_id, NULL, 'bank_interest', jsonb_build_object('money_due', money_due, 'blessing_due', blessing_due)
-         FROM updated
-         RETURNING user_id`,
+         SELECT DISTINCT user_id FROM updated_ps`,
       );
       return settled.rowCount ?? 0;
     });
