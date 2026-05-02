@@ -45,6 +45,9 @@ interface Args {
   keepData: boolean;
   skipDraw: boolean;
   skipBuy: boolean;
+  skipScore: boolean;
+  /** Phase 3 用：模擬幾個 client 並發查 leaderboard（admin + 看板 poll）*/
+  scoreReaders: number;
 }
 
 function parseArgs(): Args {
@@ -63,6 +66,8 @@ function parseArgs(): Args {
     keepData: args.includes('--keep-data'),
     skipDraw: args.includes('--skip-draw'),
     skipBuy: args.includes('--skip-buy'),
+    skipScore: args.includes('--skip-score'),
+    scoreReaders: Number(get('readers', '50')) || 50,
   };
 }
 
@@ -259,6 +264,41 @@ async function simulateBuy(pool: Pool, userId: string, stockId: string, shares: 
   }
 }
 
+// ─── Phase 3：每回合結束分數計算（leaderboard 並發查） ─────────
+// 模擬：admin / 看板 / 多個 client 同時查 500 玩家排行榜
+// 每次：SELECT 500 row JOIN + JS 端 weighted 計分 + sort + slice top 10
+async function simulateScoreCompute(
+  pool: Pool,
+  weights: { wM: number; wB: number; wK: number },
+): Promise<Sample> {
+  const t0 = Date.now();
+  try {
+    const r = await pool.query<{
+      user_id: string; name: string;
+      money: number; blessing: number; karma: number;
+    }>(
+      `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.karma
+       FROM "Account" a
+       JOIN "PlayerStats" ps ON ps.user_id = a.user_id
+       WHERE a.role = 'player' AND a.is_active = true
+       LIMIT 500`,
+    );
+    // JS 端計分（同 board.ts / admin.ts 邏輯）
+    const ranked = r.rows
+      .map((p) => ({
+        user_id: p.user_id,
+        name: p.name,
+        score: p.money * weights.wM + p.blessing * weights.wB - p.karma * weights.wK,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+    if (ranked.length === 0 && r.rows.length > 0) throw new Error('排序錯誤');
+    return { ok: true, ms: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, ms: Date.now() - t0, err: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 async function pickStock(pool: Pool, stockId: string | null): Promise<{ id: string; code: string; name: string; current_price: number }> {
   const r = await pool.query<{ id: string; code: string; name: string; current_price: number }>(
     stockId
@@ -294,6 +334,7 @@ async function writeReport(opts: {
   url: string;
   draw: PhaseStats | null;
   buy: PhaseStats | null;
+  score: PhaseStats | null;
   stockInfo: { code: string; name: string; current_price: number } | null;
   consistency: { holdingCount: number; expectedHoldings: number; totalShares: number; expectedShares: number } | null;
 }): Promise<string> {
@@ -377,10 +418,37 @@ async function writeReport(opts: {
     md.push('');
   }
 
+  // Phase 3
+  if (opts.score) {
+    const v = passFail(opts.score);
+    md.push(`## Phase 3：每回合分數計算 — ${opts.args.scoreReaders} client × 5 round 並發排行榜查詢`);
+    md.push('');
+    md.push(`**模擬情境**：1–3 個看板 + admin + 玩家多分頁同時 poll 排行榜（每回合結束後）。每個 client 連續查 5 次模擬 5 個回合。`);
+    md.push('');
+    md.push(`**流程**：每次查詢 = SELECT 500 row JOIN（Account + PlayerStats）+ JS 端 weighted 計分 + sort + slice top 10`);
+    md.push('');
+    md.push('```');
+    md.push(fmtStats(opts.score));
+    md.push('```');
+    md.push('');
+    md.push(`**驗收門檻**：`);
+    md.push(`- p95 < 300ms：${v.p95Ok ? `✅ 通過（${opts.score.p95_ms}ms）` : `❌ 不通過（${opts.score.p95_ms}ms）`}`);
+    md.push(`- error rate < 0.1%：${v.errOk ? `✅ 通過（${opts.score.error_rate}）` : `❌ 不通過（${opts.score.error_rate}）`}`);
+    md.push('');
+    if (opts.score.errors.length > 0) {
+      md.push(`錯誤分布：`);
+      opts.score.errors.forEach((e) => md.push(`- \`${e.msg}\` × ${e.count}`));
+      md.push('');
+    }
+  } else {
+    md.push(`## Phase 3：跳過`);
+    md.push('');
+  }
+
   // 總結
   md.push(`## 結論`);
   md.push('');
-  const allPhases = [opts.draw, opts.buy].filter(Boolean) as PhaseStats[];
+  const allPhases = [opts.draw, opts.buy, opts.score].filter(Boolean) as PhaseStats[];
   const totalReq = allPhases.reduce((a, b) => a + b.total, 0);
   const totalFail = allPhases.reduce((a, b) => a + b.fail, 0);
   const allP95 = allPhases.every((p) => p.p95_ms < 300);
@@ -402,7 +470,8 @@ async function writeReport(opts: {
   md.push(`- **抽卡 \`SELECT InitialValueTemplate WHERE is_active\`** 是純讀查詢，500 人同時讀無爭用`);
   md.push('');
 
-  const dest = join(process.cwd(), 'docs', 'testspeed.md');
+  // 輸出到 _raw.md（不覆蓋手動維護的綜合分析 testspeed.md）
+  const dest = join(process.cwd(), 'docs', 'testspeed_raw.md');
   writeFileSync(dest, md.join('\n') + '\n', 'utf-8');
   return dest;
 }
@@ -434,6 +503,7 @@ async function main() {
 
   let drawStats: PhaseStats | null = null;
   let buyStats: PhaseStats | null = null;
+  let scoreStats: PhaseStats | null = null;
   let stockInfo: { code: string; name: string; current_price: number } | null = null;
   let consistency: { holdingCount: number; expectedHoldings: number; totalShares: number; expectedShares: number } | null = null;
 
@@ -496,8 +566,35 @@ async function main() {
       console.log(`\n⏭  --skip-buy，跳過 Phase 2`);
     }
 
+    // ─── Phase 3：每回合分數計算（leaderboard 並發查）───
+    // 模擬：1-3 個看板 + admin + 多分頁 同時 poll 排行榜
+    // 每個 client 連續查 5 次模擬 5 個回合
+    if (!args.skipScore) {
+      console.log(`\n⏱  Phase 3：${args.scoreReaders} client × 5 round 並發查排行榜（共 ${args.scoreReaders * 5} 次查詢）...`);
+      const weights = { wM: 0.05, wB: 200, wK: 150 };
+      const t0 = Date.now();
+      const samples: Sample[] = [];
+      // 每個 client 連續 5 次查（模擬 5 個回合的 dashboard reload / board poll）
+      const allPromises: Promise<Sample[]>[] = [];
+      for (let c = 0; c < args.scoreReaders; c++) {
+        allPromises.push((async () => {
+          const out: Sample[] = [];
+          for (let r = 0; r < 5; r++) {
+            out.push(await simulateScoreCompute(pool, weights));
+          }
+          return out;
+        })());
+      }
+      const all = await Promise.all(allPromises);
+      for (const arr of all) samples.push(...arr);
+      scoreStats = summarize(samples, Date.now() - t0);
+      console.log(`📊 Phase 3 結果：avg=${scoreStats.avg_ms}ms / p95=${scoreStats.p95_ms}ms / err=${scoreStats.error_rate}`);
+    } else {
+      console.log(`\n⏭  --skip-score，跳過 Phase 3`);
+    }
+
     // ─── 寫報告 ───
-    const dest = await writeReport({ args, isPgBouncer, url, draw: drawStats, buy: buyStats, stockInfo, consistency });
+    const dest = await writeReport({ args, isPgBouncer, url, draw: drawStats, buy: buyStats, score: scoreStats, stockInfo, consistency });
     console.log(`\n📝 報告已寫入：${dest}\n`);
 
     if (args.cleanup) {
