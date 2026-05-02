@@ -15,7 +15,9 @@ export default function BoardClient({ initial, token }: Props) {
   const [data, setData] = useState<BoardData>(initial);
   const [now, setNow] = useState(Date.now());
   const [eventIdx, setEventIdx] = useState(0);
-  const [forceFinal, setForceFinal] = useState(false);
+  // null = 跟著 server 狀態（final_scoring_triggered_at）
+  // true / false = user 主動 toggle 鎖定的顯示狀態
+  const [userOverride, setUserOverride] = useState<boolean | null>(null);
   /** 終局榜單表頭排序欄位（排名固定不可選；預設 final_score 由大到小） */
   const [sortKey, setSortKey] = useState<'final_score' | 'money' | 'blessing' | 'health' | 'karma' | 'rebirth_count'>('final_score');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
@@ -64,7 +66,9 @@ export default function BoardClient({ initial, token }: Props) {
     (!data.config.marquee_until || new Date(data.config.marquee_until).getTime() > now)
   );
 
-  const isFinal = forceFinal || !!data.config.final_scoring_triggered_at;
+  // user 主動 toggle 後鎖定該選擇；無 override 時跟 server 狀態
+  const serverIsFinal = !!data.config.final_scoring_triggered_at;
+  const isFinal = userOverride !== null ? userOverride : serverIsFinal;
   const upClass = data.config.color_scheme === 'red_up' ? 'text-rose-400' : 'text-emerald-400';
   const downClass = data.config.color_scheme === 'red_up' ? 'text-emerald-400' : 'text-rose-400';
 
@@ -115,7 +119,7 @@ export default function BoardClient({ initial, token }: Props) {
               <span className="text-lg font-medium text-zinc-300">已連線</span>
             </div>
             <button
-              onClick={() => setForceFinal((v) => !v)}
+              onClick={() => setUserOverride(!isFinal)}
               className={`px-4 py-2 rounded-full font-bold border transition-colors shadow-lg ${
                 isFinal
                   ? 'bg-amber-500 text-zinc-950 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
