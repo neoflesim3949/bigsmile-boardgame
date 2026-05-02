@@ -1214,6 +1214,15 @@ export interface AdminDashboardData {
     rebirth_count: number;
     final_score: number;
   }>;
+  /** 最近 10 筆推進紀錄（最新在前） */
+  tickHistory: Array<{
+    round: number;
+    ticked_at: string;
+    /** 該回合事件文字（若有設） */
+    event_text: string | null;
+    /** 遊戲時間（秒）= ticked_at - game_started_at；null 代表無 BoardGameStartedAt 基準 */
+    game_time_seconds: number | null;
+  }>;
 }
 
 export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardData>> {
@@ -1272,6 +1281,27 @@ export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardDa
       .sort((a, b) => b.final_score - a.final_score)
       .slice(0, 50);
 
+    // 最近 10 筆推進紀錄
+    const ticksRaw = await query<{ created_at: string; payload: { round?: number; event_text?: string | null; game_started_at?: string | null } }>(
+      `SELECT created_at, payload
+       FROM "Transaction"
+       WHERE tx_type = 'round_tick'
+       ORDER BY created_at DESC
+       LIMIT 10`,
+    );
+    const tickHistory = ticksRaw.rows.map((t) => {
+      const startedAt = t.payload?.game_started_at || sm.get('BoardGameStartedAt') || null;
+      const gameTime = startedAt
+        ? Math.max(0, Math.round((new Date(t.created_at).getTime() - new Date(startedAt).getTime()) / 1000))
+        : null;
+      return {
+        round: Number(t.payload?.round ?? 0),
+        ticked_at: t.created_at,
+        event_text: t.payload?.event_text ?? null,
+        game_time_seconds: gameTime,
+      };
+    });
+
     const dash: AdminDashboardData = {
       counts: {
         players: Number(counts.rows[0].players),
@@ -1294,6 +1324,7 @@ export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardDa
         triggered_at: board.rows[0].final_scoring_triggered_at,
       },
       leaderboard,
+      tickHistory,
     };
     return ok(dash);
   } catch (err) {
@@ -1432,6 +1463,8 @@ export async function restartGameCycle(): Promise<ActionResult<{ reset_at: strin
         `DELETE FROM "Transaction"
          WHERE user_id IN (SELECT user_id FROM "Account" WHERE role = 'player')`,
       );
+      // 6b. 推進歷史紀錄（admin 寫的 round_tick 不會被上面 player-only 清掉）
+      await client.query(`DELETE FROM "Transaction" WHERE tx_type = 'round_tick'`);
       // 6. BoardConfig 場次狀態
       const upd = await client.query<{ updated_at: string }>(
         `UPDATE "BoardConfig"

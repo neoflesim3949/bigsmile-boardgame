@@ -130,7 +130,7 @@ export default function BoardClient({ initial, token }: Props) {
 
       <main className="flex-1 flex px-8 py-8 gap-6 h-[75vh] pointer-events-none">
         {!isFinal && (
-          <div className="w-[56%] glass-panel rounded-3xl p-6 flex flex-col border border-zinc-800 transition-all duration-500">
+          <div className="w-[54%] glass-panel rounded-3xl p-6 flex flex-col border border-zinc-800 transition-all duration-500">
             <h2 className="text-2xl font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-4 uppercase tracking-widest">
               重點趨勢
             </h2>
@@ -163,14 +163,15 @@ export default function BoardClient({ initial, token }: Props) {
               <table className="w-full text-left text-xl">
                 <thead>
                   <tr className="text-zinc-500 border-b-2 border-zinc-800">
-                    <th className="pb-4 font-normal">代碼 / 名稱</th>
+                    <th className="pb-4 font-normal w-20">代碼</th>
+                    <th className="pb-4 font-normal">名稱</th>
                     <th className="pb-4 text-right font-normal">價格</th>
                     <th className="pb-4 text-right pr-4 font-normal">漲跌</th>
                   </tr>
                 </thead>
                 <tbody className="text-zinc-200">
                   {visibleAll.length === 0 ? (
-                    <tr><td colSpan={3} className="py-12 text-center text-zinc-600">尚無公開上架的商品</td></tr>
+                    <tr><td colSpan={4} className="py-12 text-center text-zinc-600">尚無公開上架的商品</td></tr>
                   ) : (
                     visibleAll.map((s) => {
                       const old = s.history.length > 0 ? s.history[0].price : s.current_price;
@@ -181,10 +182,8 @@ export default function BoardClient({ initial, token }: Props) {
                       const cls = flat ? 'text-zinc-400' : up ? upClass : downClass;
                       return (
                         <tr key={s.id} className="border-b border-zinc-800/60">
-                          <td className="py-4">
-                            <span className="font-bold text-zinc-400 w-16 inline-block">{s.code}</span>
-                            <span className="font-medium ml-2">{s.name}</span>
-                          </td>
+                          <td className="py-4 font-bold text-zinc-400 w-20">{s.code}</td>
+                          <td className="py-4 font-medium">{s.name}</td>
                           <td className="py-4 text-right font-black text-amber-400">{s.current_price.toLocaleString()}</td>
                           <td className={`py-4 text-right pr-2 font-bold ${cls}`}>
                             <span className="inline-flex items-center gap-1 justify-end">
@@ -202,20 +201,20 @@ export default function BoardClient({ initial, token }: Props) {
           </div>
         )}
 
-        <div className={`${isFinal ? 'w-full' : 'w-[12%]'} glass-panel rounded-3xl ${isFinal ? 'p-8' : 'p-3'} flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
+        <div className={`${isFinal ? 'w-full' : 'w-[14%]'} glass-panel rounded-3xl ${isFinal ? 'p-8' : 'p-4'} flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
           {isFinal && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500"></div>}
-          <h2 className={`font-bold text-zinc-400 ${isFinal ? 'pl-4 border-l-4 mb-6 text-4xl py-2' : 'pl-2 border-l-2 mb-3 text-sm'} border-amber-500 uppercase tracking-widest flex justify-between items-end`}>
+          <h2 className={`font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 ${isFinal ? 'mb-6 text-4xl py-2' : 'mb-4 text-2xl'} uppercase tracking-widest flex justify-between items-end`}>
             <span className="text-zinc-100">🏆 風雲榜</span>
             {isFinal && <span className="text-xl font-normal text-zinc-500 normal-case tracking-normal">
               {data.config.final_scoring_triggered_at ? '最終結算成績' : '即時概況'}
             </span>}
           </h2>
           <div className="flex-1 overflow-y-auto no-scrollbar">
-            <table className={`w-full text-left ${isFinal ? 'text-xl' : 'text-xs'}`}>
+            <table className={`w-full text-left ${isFinal ? 'text-xl' : 'text-xl'}`}>
               <thead className="sticky top-0 bg-zinc-900/95 backdrop-blur-sm z-20 shadow-md">
                 <tr className="text-zinc-500 border-b-2 border-zinc-800">
-                  <th className={`pb-2 font-normal text-center ${isFinal ? 'w-20' : 'w-8'}`}>排名</th>
-                  <th className={`pb-2 font-normal ${isFinal ? 'pl-4' : 'pl-2'}`}>姓名</th>
+                  <th className={`pb-4 font-normal text-center ${isFinal ? 'w-20' : 'w-12'}`}>排名</th>
+                  <th className={`pb-4 font-normal ${isFinal ? 'pl-4' : 'pl-2'}`}>姓名</th>
                   {isFinal && (
                     <>
                       <SortTh title="金錢" color="amber" sortKey="money" active={sortKey === 'money'} dir={sortDir} onClick={toggleSort} />
@@ -271,9 +270,9 @@ export default function BoardClient({ initial, token }: Props) {
                     const rank = i + 1;
                     return (
                       <tr key={r.user_id} className="border-b border-zinc-800/60">
-                        <td className="py-2 text-center w-8">
+                        <td className="py-3 text-center w-12">
                           {rank <= 3 ? (
-                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-xs shadow-lg ${
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-black text-base shadow-lg ${
                               rank === 1 ? 'bg-yellow-400 text-yellow-900 shadow-yellow-400/20'
                                 : rank === 2 ? 'bg-zinc-300 text-zinc-800'
                                 : 'bg-amber-600 text-amber-100'
@@ -281,10 +280,10 @@ export default function BoardClient({ initial, token }: Props) {
                               {rank}
                             </span>
                           ) : (
-                            <span className="font-bold text-zinc-500 text-sm">{rank}</span>
+                            <span className="font-bold text-zinc-500 text-lg">{rank}</span>
                           )}
                         </td>
-                        <td className={`py-2 pl-2 font-bold text-sm tracking-tight truncate ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
+                        <td className={`py-3 pl-2 font-bold text-lg tracking-wide truncate ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
                           {r.name}
                         </td>
                       </tr>
@@ -480,5 +479,5 @@ function Sparkline({ points, color }: { points: BoardData['stocks'][number]['his
     ctx.stroke();
   }, [points, color]);
 
-  return <canvas ref={ref} className="w-full h-16 absolute bottom-0 left-0 right-0 opacity-80" />;
+  return <canvas ref={ref} className="w-full h-24 absolute bottom-0 left-0 right-0 opacity-80" />;
 }

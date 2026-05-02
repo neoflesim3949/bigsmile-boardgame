@@ -16,7 +16,7 @@ export async function tickRound(): Promise<
   ActionResult<{ round: number; players_settled: number }>
 > {
   try {
-    await requireRole('admin');
+    const session = await requireRole('admin');
 
     // ─── Tx 1：股價 + 回合計數（含 30 秒節流，原子 SQL 防誤點）───
     const tx1 = await withTx(async (client) => {
@@ -94,6 +94,23 @@ export async function tickRound(): Promise<
           [evText],
         );
       }
+
+      // 推進歷史紀錄（讓 admin dashboard 撈最近 N 筆顯示「時間 | 遊戲時間」）
+      // 用 BoardGameStartedAt 做 game_time 基準（admin.ts 旗標）
+      const startR = await client.query<{ value: string }>(
+        `SELECT value FROM "AppSettings" WHERE key = 'BoardGameStartedAt'`,
+      );
+      const startedAt = startR.rows[0]?.value || null;
+      await client.query(
+        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+         VALUES ($1, $1, 'round_tick', $2)`,
+        [session.userId, JSON.stringify({
+          round: newRound,
+          event_text: evText || null,
+          game_started_at: startedAt,
+        })],
+      );
+
       return newRound;
     });
 
