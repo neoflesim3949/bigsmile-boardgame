@@ -23,5 +23,6 @@ export default async function OnboardingPage() {
   );
   if (r.rows[0]?.destiny_name) redirect('/');
 
+  // 抽命格場景屬玩家「自身命格揭露」，可顯示完整 stats（含福分/業力）
   return <OnboardingClient />;
 }

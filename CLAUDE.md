@@ -196,6 +196,13 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **`/admin/*` 桌面優先**（≥1280px 為主要設計斷點，**ThemeProvider 強制深色 + md 字級**，不跟玩家偏好）：可直接擺寬表格、側欄、多欄 dashboard；**手機仍須能訪問**（不破版、能看懂、能執行核心操作即可，不必逐元件響應式優化）
 - **`/captain` 與 `/captain/scan` 手機優先**：關主在現場拿手機操作，必測直立／橫式切換、相機釋放。**必須使用 SWR/localStorage 等機制暫存快捷模組**，不可每次刷新都重撈。
 - **`/`、`/stock` 玩家頁**：手機 / 桌面雙端皆要好。玩家金錢與健康始終公開顯示（健康寫入與顯示上限為 `100`），**福分與業力僅在 `ShowAllStats = true` 時顯示**。**頁面右上角必有「🔄 重新整理」按鈕**，點擊後 disabled 並顯示倒數，cooldown 秒數讀 `AppSettings.ManualRefreshCooldownSeconds`（預設 60，兩個玩家頁共用，後端 atomic 節流為主、前端 disable 為輔）。
+
+- **「福分／福報」字眼可見範圍**（CRITICAL，含同義字）：
+  - ✅ **可見**：admin / captain 後台所有頁面、看板（display/board）含 sparkline 與最終結算榜單、`/onboarding` 抽命格揭露、玩家最終結算後的歷史明細
+  - ✅ **條件可見**：`/`、`/stock` 等玩家日常頁面在 `ShowAllStats=true` 時可顯示福分卡片
+  - ❌ **不可見**（即使 ShowAllStats=true 也禁止）：`/exchange` 與 `/bank` 路由（CLAUDE.md §6.2）— 任何錯誤訊息、UI label、計算過程都不能含「福分」「福報」字眼
+  - ❌ **依 ShowAllStats 隱藏**：玩家頁面的 settings 字體預覽、history 錯誤提示文字、地獄畫面死因說明 — `ShowAllStats=false` 時改用「指標」「隱藏參數」等籠統字眼
+  - **server action 錯誤訊息**：玩家可見的 action（buyStock、sellStock、exchangeBlessing、borrowFromBank、repayBank、transferMoney 等）拋出 `INSUFFICIENT_FUNDS` / `INVALID_INPUT` 時不能直接寫「福分不足」，要改用「額度不足（最多 N 單位）」之類間接說法
 - **`/exchange` 換匯所**：**禁止**在前台顯示任何福報相關資訊（餘額、消耗量）。玩家只看到「每方案最高可兌換現金」與「每單位獲得金錢」，選方案後輸入「兌換單位數」；後端靜默扣除福報。
 - **`/bank` 銀行借貸**：**禁止**在前台顯示任何福報相關資訊（利率比例、福報扣除量、抵押計算過程）。錯誤訊息一律以「單位（unit）」表達不能用「福分不足」。玩家只看到借款金額與每回合利息（金錢）；每回合利息結算與福報扣除由後台 `tickRound` 靜默完成。**借款合約化（CRITICAL）**：每次 borrow → 新建一張 `PlayerLoan` 獨立 row（含 id / loan_label / principal / balance / 凍結的 base_interest_*）；還款 `repayBank({ loanId, amount })` 只減該合約 balance；利息結算每回合對每張未還清合約 `ROUND(base_interest * balance / principal)` 個別算（部分還款後利息按比例自動降）。前台顯示「合約清單」每張可獨立還款，**不可**用單一 `bank_loan` 總額還款。
 - **`/transfer` 玩家轉帳**：**不預先列出任何玩家清單**。玩家需輸入完整 ID（≥ 6 碼）才觸發查詢；亦支援 QR 掃碼自動填入。找到後顯示對方卡片，未找到顯示錯誤。

@@ -57,11 +57,15 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
         <Skull className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
         <h1 className="text-3xl font-bold text-rose-400 mb-2">你已下地獄</h1>
         <p className="text-zinc-400 max-w-sm mb-6">
-          {stats.health <= 0 && stats.blessing <= 0
-            ? '健康與福分均歸零'
-            : stats.health <= 0
-              ? '健康歸零'
-              : '福分歸零'}
+          {stats.show_all_stats
+            ? (stats.health <= 0 && stats.blessing <= 0
+                ? '健康與福分均歸零'
+                : stats.health <= 0
+                  ? '健康歸零'
+                  : '福分歸零')
+            : (stats.health <= 0
+                ? '健康歸零'
+                : '指標已歸零')}
           ，所有功能停用。請找擁有「重生鍵」的關主掃描你的 QR Code 執行重生。
         </p>
         <div className="bg-zinc-900 border border-rose-900/40 rounded-2xl p-6 mb-4">

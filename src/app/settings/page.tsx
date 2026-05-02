@@ -167,7 +167,7 @@ export default function SettingsPage() {
           <div className={`mt-4 p-3 rounded-lg border ${isDark ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-100 border-zinc-200'}`}>
             <p className={`text-xs mb-1 ${isDark ? 'text-zinc-600' : 'text-zinc-400'}`}>預覽效果</p>
             <p className={`font-medium leading-relaxed ${isDark ? 'text-zinc-200' : 'text-zinc-700'}`}>
-              開運大富翁｜金錢 12,500｜福分 45
+              開運大富翁｜金錢 12,500｜健康 80
             </p>
           </div>
         </section>

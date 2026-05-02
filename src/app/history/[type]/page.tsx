@@ -18,7 +18,7 @@ export default async function HistoryPage({ params }: Props) {
       <div className="min-h-screen p-8 text-center text-zinc-400">
         <p className="text-rose-400 text-2xl mb-2">無法檢視</p>
         <p className="text-sm">{r.error?.message ?? ''}</p>
-        <p className="text-xs mt-4">福分／業力的歷史明細只在後台開啟「顯示隱藏參數」或活動結束後才公開。</p>
+        <p className="text-xs mt-4">部分指標的歷史明細只在後台開啟「顯示隱藏參數」或活動結束後才公開。</p>
       </div>
     );
   }
