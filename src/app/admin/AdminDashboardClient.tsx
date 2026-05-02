@@ -293,22 +293,27 @@ export default function AdminDashboardClient({ initial }: Props) {
             </button>
             {data.tickHistory && data.tickHistory.length > 0 && (
               <div className="mt-4 pt-3 border-t border-zinc-800">
-                <p className="text-[0.6875rem] uppercase tracking-widest text-zinc-500 mb-2">推進歷史</p>
-                <ul className="space-y-1.5 max-h-48 overflow-y-auto">
+                <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 px-2 pb-2 text-[0.6875rem] uppercase tracking-widest text-zinc-500 border-b border-zinc-800">
+                  <span>推進歷史</span>
+                  <span className="text-right">時間</span>
+                  <span className="text-right">系統時間</span>
+                </div>
+                <ul className="space-y-1.5 max-h-48 overflow-y-auto mt-2">
                   {data.tickHistory.map((t, i) => (
                     <li
                       key={`${t.round}_${t.ticked_at}`}
-                      className={`flex items-center justify-between text-xs px-2 py-1.5 rounded ${
+                      className={`grid grid-cols-[auto_1fr_auto] gap-x-3 items-center text-xs px-2 py-1.5 rounded ${
                         i === 0 ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-zinc-900/40'
                       }`}
                     >
                       <span className={`font-mono font-bold ${i === 0 ? 'text-blue-300' : 'text-zinc-400'}`}>
                         #{t.round}
                       </span>
-                      <span className="text-zinc-300 font-mono">
+                      <span className="text-right text-zinc-300 font-mono">
                         {new Date(t.ticked_at).toLocaleTimeString('zh-TW', { hour12: false })}
-                        <span className="mx-1.5 text-zinc-600">|</span>
-                        <span className="text-amber-400">{formatGameTime(t.game_time_seconds)}</span>
+                      </span>
+                      <span className="text-right text-amber-400 font-mono">
+                        {formatGameTime(t.game_time_seconds)}
                       </span>
                     </li>
                   ))}

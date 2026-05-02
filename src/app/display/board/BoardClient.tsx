@@ -479,5 +479,5 @@ function Sparkline({ points, color }: { points: BoardData['stocks'][number]['his
     ctx.stroke();
   }, [points, color]);
 
-  return <canvas ref={ref} className="w-full h-24 absolute bottom-0 left-0 right-0 opacity-80" />;
+  return <canvas ref={ref} className="w-full h-40 absolute bottom-0 left-0 right-0 opacity-80" />;
 }
