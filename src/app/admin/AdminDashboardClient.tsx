@@ -140,14 +140,21 @@ export default function AdminDashboardClient({ initial }: Props) {
     });
   }
 
-  function handleCustomMultiplier() {
-    const input = window.prompt('輸入自訂倍率（0.0–10.0，例：1.25）', data.flags.exchange_rate_multiplier.toFixed(2));
-    if (input === null) return;
-    const v = Number(input);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customInput, setCustomInput] = useState('');
+
+  function openCustomMultiplier() {
+    setCustomInput(data.flags.exchange_rate_multiplier.toFixed(2));
+    setCustomOpen(true);
+  }
+
+  function submitCustomMultiplier() {
+    const v = Number(customInput);
     if (!Number.isFinite(v) || v < 0 || v > 10) {
       showToast(false, '倍率需介於 0–10 之間');
       return;
     }
+    setCustomOpen(false);
     handleSetMultiplier(v);
   }
 
@@ -298,7 +305,7 @@ export default function AdminDashboardClient({ initial }: Props) {
                   <span className="text-right">時間</span>
                   <span className="text-right">系統時間</span>
                 </div>
-                <ul className="space-y-1.5 max-h-48 overflow-y-auto mt-2">
+                <ul className="space-y-1.5 h-32 overflow-y-auto mt-2">
                   {data.tickHistory.map((t, i) => (
                     <li
                       key={`${t.round}_${t.ticked_at}`}
@@ -391,7 +398,7 @@ export default function AdminDashboardClient({ initial }: Props) {
                 );
               })}
               <button
-                onClick={handleCustomMultiplier}
+                onClick={openCustomMultiplier}
                 disabled={busy}
                 className="flex-1 py-1.5 text-xs rounded border bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200 min-h-[36px]"
               >
@@ -487,6 +494,50 @@ export default function AdminDashboardClient({ initial }: Props) {
             await performRestart();
           }}
         />
+      )}
+
+      {customOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4"
+          onClick={() => setCustomOpen(false)}
+        >
+          <div
+            className="bg-zinc-900 border border-teal-700/60 rounded-2xl p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 className="font-bold text-teal-400 text-base mb-2">自訂換匯倍率</h4>
+            <p className="text-xs text-zinc-500 mb-4">輸入 0.0–10.0（例：1.25 = +25%、0.5 = −50%）</p>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="10"
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitCustomMultiplier();
+                if (e.key === 'Escape') setCustomOpen(false);
+              }}
+              autoFocus
+              className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-center text-2xl font-mono mb-4"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCustomOpen(false)}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg text-sm font-bold border border-zinc-700 min-h-[44px]"
+              >
+                取消
+              </button>
+              <button
+                onClick={submitCustomMultiplier}
+                disabled={busy}
+                className="flex-1 bg-teal-500 hover:bg-teal-400 disabled:opacity-60 text-zinc-950 py-2 rounded-lg text-sm font-bold min-h-[44px]"
+              >
+                套用
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
