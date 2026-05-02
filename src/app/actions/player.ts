@@ -448,7 +448,7 @@ export async function listExchangeOptionsForPlayer(): Promise<ActionResult<Excha
 }
 
 const exchangeSchema = z.object({
-  optionId: z.string().uuid(),
+  optionId: z.uuid(),
   units: z.number().int().positive(),
 });
 
@@ -565,7 +565,7 @@ export async function listBankLoanOptionsForPlayer(): Promise<ActionResult<BankL
 }
 
 const borrowSchema = z.object({
-  optionId: z.string().uuid(),
+  optionId: z.uuid(),
   units: z.number().int().positive(),
 });
 

@@ -111,7 +111,7 @@ export async function getStockMarket(manual = false): Promise<ActionResult<{
 }
 
 const buySchema = z.object({
-  stockId: z.string().uuid(),
+  stockId: z.uuid(),
   shares: z.number().int().positive().max(1_000_000),
 });
 
@@ -124,13 +124,15 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
       await assertNotDuringFinalScoring(client);
 
       // 不鎖 Stock row（CLAUDE.md §3.2 / §11）— 股價以呼叫當下價成交
-      const stock = await client.query<{ current_price: number }>(
-        `SELECT current_price FROM "Stock" WHERE id = $1`,
+      const stock = await client.query<{ current_price: number; code: string; name: string }>(
+        `SELECT current_price, code, name FROM "Stock" WHERE id = $1`,
         [data.stockId],
       );
       if (stock.rows.length === 0) throw new ActionError('NOT_FOUND', '股票不存在');
 
       const price = stock.rows[0].current_price;
+      const stockCode = stock.rows[0].code;
+      const stockName = stock.rows[0].name;
       const cost = price * data.shares;
 
       const ps = await client.query<{ money: number; health: number; blessing: number }>(
@@ -165,7 +167,10 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
          VALUES ($1, $1, 'stock_buy', $2)`,
-        [session.userId, JSON.stringify({ stock_id: data.stockId, shares: data.shares, price, cost })],
+        [session.userId, JSON.stringify({
+          stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
+          shares: data.shares, price, cost,
+        })],
       );
 
       return {
@@ -185,7 +190,7 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
 }
 
 const sellSchema = z.object({
-  stockId: z.string().uuid(),
+  stockId: z.uuid(),
   shares: z.number().int().positive().max(1_000_000),
 });
 
@@ -197,14 +202,16 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
 
-      const stock = await client.query<{ current_price: number; is_sellable: boolean }>(
-        `SELECT current_price, is_sellable FROM "Stock" WHERE id = $1`,
+      const stock = await client.query<{ current_price: number; is_sellable: boolean; code: string; name: string }>(
+        `SELECT current_price, is_sellable, code, name FROM "Stock" WHERE id = $1`,
         [data.stockId],
       );
       if (stock.rows.length === 0) throw new ActionError('NOT_FOUND', '股票不存在');
       if (!stock.rows[0].is_sellable) throw new ActionError('FORBIDDEN', '此商品不可賣回');
 
       const price = stock.rows[0].current_price;
+      const stockCode = stock.rows[0].code;
+      const stockName = stock.rows[0].name;
 
       const psHolding = await client.query<{ money: number; health: number; blessing: number; shares: number; avg_cost: number }>(
         `SELECT ps.money, ps.health, ps.blessing,
@@ -246,7 +253,10 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
          VALUES ($1, $1, 'stock_sell', $2)`,
-        [session.userId, JSON.stringify({ stock_id: data.stockId, shares: data.shares, price, proceeds, profit })],
+        [session.userId, JSON.stringify({
+          stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
+          shares: data.shares, price, proceeds, profit,
+        })],
       );
 
       return {

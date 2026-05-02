@@ -93,19 +93,19 @@ export async function listMyQuickActions(): Promise<ActionResult<QuickActionRow[
 }
 
 const quickActionSchema = z.object({
-  id: z.string().uuid().optional(),
-  station_id: z.string().uuid(),
+  id: z.uuid().optional(),
+  station_id: z.uuid(),
   label: z.string().min(1).max(60),
   delta_money: z.number().int(),
   delta_health: z.number().int(),
   delta_blessing: z.number().int(),
   delta_karma: z.number().int(),
-  bound_item_id: z.string().uuid().nullable(),
+  bound_item_id: z.uuid().nullable(),
   req_money: z.number().int().nullable(),
   req_health: z.number().int().nullable(),
   req_blessing: z.number().int().nullable(),
   req_karma: z.number().int().nullable(),
-  req_item_id: z.string().uuid().nullable(),
+  req_item_id: z.uuid().nullable(),
   player_max_uses: z.number().int().positive().nullable(),
   global_max_uses: z.number().int().positive().nullable(),
 });
@@ -313,7 +313,7 @@ export async function lookupPlayerByManualId(
 // 套用快捷模組（pg tx；前置檢查 + 限額 + 道具發放 + 計數 + Transaction）
 // ─────────────────────────────────────────────────────────────
 const applySchema = z.object({
-  quickActionId: z.string().uuid(),
+  quickActionId: z.uuid(),
   targetUserId: z.string().min(3),
 });
 
@@ -335,8 +335,11 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
       // 抓快捷模組 + 對應關卡（單一 SQL）
       const qa = await client.query<{
         id: string; station_id: string; owner_user_id: string;
+        label: string;
+        station_name: string;
         delta_money: number; delta_health: number; delta_blessing: number; delta_karma: number;
         bound_item_id: string | null;
+        bound_item_name: string | null;
         req_money: number | null; req_health: number | null; req_blessing: number | null; req_karma: number | null;
         req_item_id: string | null;
         player_max_uses: number | null; global_max_uses: number | null;
@@ -347,8 +350,10 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
         captain_user_ids: string[];
       }>(
         `SELECT qa.id, qa.station_id, qa.owner_user_id,
+                qa.label,
+                s.name AS station_name,
                 qa.delta_money, qa.delta_health, qa.delta_blessing, qa.delta_karma,
-                qa.bound_item_id,
+                qa.bound_item_id, i.name AS bound_item_name,
                 qa.req_money, qa.req_health, qa.req_blessing, qa.req_karma, qa.req_item_id,
                 qa.player_max_uses, qa.global_max_uses, qa.global_use_count,
                 s.player_max_uses AS station_player_max,
@@ -357,6 +362,7 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
                 s.captain_user_ids
          FROM "QuickAction" qa
          JOIN "Station" s ON s.id = qa.station_id
+         LEFT JOIN "Item" i ON i.id = qa.bound_item_id
          WHERE qa.id = $1
          FOR UPDATE OF qa, s`,
         [data.quickActionId],
@@ -476,9 +482,12 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
           data.targetUserId, session.userId,
           JSON.stringify({
             quick_action_id: data.quickActionId,
+            quick_action_label: q.label,
             station_id: q.station_id,
+            station_name: q.station_name,
             delta: { money: q.delta_money, health: q.delta_health, blessing: q.delta_blessing, karma: q.delta_karma },
             granted_item_id: grantedItemId,
+            granted_item_name: q.bound_item_name,
           }),
         ],
       );
@@ -506,7 +515,7 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
 // ─────────────────────────────────────────────────────────────
 const rebirthSchema = z.object({
   qrToken: z.string(),     // 必須走掃碼路徑，不接受手動輸入 user_id
-  stationId: z.string().uuid(),
+  stationId: z.uuid(),
 });
 
 export async function rebirthPlayer(p: z.infer<typeof rebirthSchema>): Promise<ActionResult<{

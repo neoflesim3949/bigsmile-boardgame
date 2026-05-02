@@ -46,7 +46,7 @@ export async function updateAppSettings(
 const themeEnum = z.enum(['amber', 'teal', 'purple', 'rose', 'sky', 'zinc']);
 
 const templateSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   label: z.string().min(1).max(40),
   emoji: z.string().min(1).max(8),
   description: z.string().max(120),
@@ -117,7 +117,7 @@ export async function upsertTemplate(payload: TemplatePayload): Promise<ActionRe
 export async function deleteTemplate(id: string): Promise<ActionResult<null>> {
   try {
     await requireRole('admin');
-    if (!z.string().uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
+    if (!z.uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
     await query(`DELETE FROM "InitialValueTemplate" WHERE id = $1`, [id]);
     revalidatePath('/admin/settings');
     return ok(null);
@@ -388,7 +388,7 @@ export async function deleteAccount(userId: string): Promise<ActionResult<null>>
 // Station CRUD
 // ─────────────────────────────────────────────────────────────
 const stationSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   name: z.string().min(1).max(60),
   description: z.string().max(400),
   captain_user_ids: z.array(z.string()),
@@ -469,7 +469,7 @@ export async function upsertStation(payload: StationPayload): Promise<ActionResu
 export async function deleteStation(id: string): Promise<ActionResult<null>> {
   try {
     await requireRole('admin');
-    if (!z.string().uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
+    if (!z.uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
     await query(`DELETE FROM "Station" WHERE id = $1`, [id]);
     revalidatePath('/admin/stations');
     return ok(null);
@@ -496,7 +496,7 @@ export async function listCaptains(): Promise<ActionResult<{ user_id: string; na
 // Item CRUD
 // ─────────────────────────────────────────────────────────────
 const itemSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   name: z.string().min(1).max(60),
   icon: z.string().max(20),
   description: z.string().max(200),
@@ -554,7 +554,7 @@ export async function upsertItem(payload: ItemPayload): Promise<ActionResult<Ite
 export async function deleteItem(id: string): Promise<ActionResult<null>> {
   try {
     await requireRole('admin');
-    if (!z.string().uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
+    if (!z.uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
     await query(`DELETE FROM "Item" WHERE id = $1`, [id]);
     revalidatePath('/admin/items');
     return ok(null);
@@ -567,7 +567,7 @@ export async function deleteItem(id: string): Promise<ActionResult<null>> {
 // Stock CRUD
 // ─────────────────────────────────────────────────────────────
 const stockSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   code: z.string().min(1).max(20),
   name: z.string().min(1).max(60),
   current_price: z.number().int().min(0),
@@ -660,7 +660,7 @@ export async function upsertStock(payload: StockPayload): Promise<ActionResult<S
 export async function deleteStock(id: string): Promise<ActionResult<null>> {
   try {
     await requireRole('admin');
-    if (!z.string().uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
+    if (!z.uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
     await query(`DELETE FROM "Stock" WHERE id = $1`, [id]);
     revalidatePath('/admin/stocks');
     return ok(null);
@@ -720,7 +720,7 @@ export async function listStockScripts(): Promise<ActionResult<StockRoundScripts
 
 const scriptCellSchema = z.object({
   round: z.number().int().positive(),
-  stock_id: z.string().uuid(),
+  stock_id: z.uuid(),
   change_type: z.enum(['percent', 'fixed']),
   change_value: z.number().int(),
 });
@@ -799,7 +799,7 @@ export async function deleteWholeRoundScript(round: number): Promise<ActionResul
 // 換匯所方案 CRUD
 // ─────────────────────────────────────────────────────────────
 const exchangeOptSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   label: z.string().min(1).max(60),
   blessing_cost_per_unit: z.number().int().positive(),
   money_gain_per_unit: z.number().int().positive(),
@@ -866,7 +866,7 @@ export async function deleteExchangeOption(id: string): Promise<ActionResult<nul
 // 銀行借貸方案 CRUD
 // ─────────────────────────────────────────────────────────────
 const loanOptSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   label: z.string().min(1).max(60),
   blessing_collateral_per_unit: z.number().int().positive(),
   money_per_unit: z.number().int().positive(),
@@ -946,7 +946,7 @@ export async function deleteBankLoanOption(id: string): Promise<ActionResult<nul
 // Event CRUD + Marquee
 // ─────────────────────────────────────────────────────────────
 const eventSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   title: z.string().min(1).max(60),
   text: z.string().min(1).max(200),
   start_at: z.string().nullable(),
@@ -1092,7 +1092,7 @@ export async function getBoardConfig(): Promise<ActionResult<BoardConfigRow>> {
 
 const boardConfigSchema = z.object({
   title: z.string().min(1).max(60),
-  featured_stock_ids: z.array(z.string().uuid()).max(4),
+  featured_stock_ids: z.array(z.uuid()).max(4),
   color_scheme: z.enum(['red_up', 'green_up']),
   event_rotate_seconds: z.number().int().min(1).max(60),
 });

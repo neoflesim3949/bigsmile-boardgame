@@ -28,7 +28,9 @@ function ttlSeconds(envKey: string, fallback: number): number {
 }
 
 export function signAccessToken(payload: SessionPayload): { token: string; maxAge: number } {
-  const maxAge = ttlSeconds('ACCESS_TOKEN_TTL_SECONDS', 1800);
+  // 預設 1 天 — 活動場景低敏感、避免進行中反覆登出
+  // 可由 env ACCESS_TOKEN_TTL_SECONDS 覆寫（高敏感環境建議 1800 秒）
+  const maxAge = ttlSeconds('ACCESS_TOKEN_TTL_SECONDS', 60 * 60 * 24);
   const token = jwt.sign(payload, authSecret(), { expiresIn: maxAge } as SignOptions);
   return { token, maxAge };
 }
