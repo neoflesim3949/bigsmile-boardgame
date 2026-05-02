@@ -565,8 +565,10 @@ export async function rebirthPlayer(p: z.infer<typeof rebirthSchema>): Promise<A
         `SELECT stock_id, shares FROM "StockHolding" WHERE user_id = $1`,
         [targetId],
       );
-      const loans = await client.query<{ loan_option_id: string; units: number }>(
-        `SELECT loan_option_id, units FROM "PlayerLoan" WHERE user_id = $1`,
+      // PlayerLoan 已合約化（migration 0004）：每筆借款一張 row，含 principal/balance/loan_label
+      const loans = await client.query<{ id: string; loan_label: string; principal: number; balance: number }>(
+        `SELECT id, loan_label, principal, balance
+         FROM "PlayerLoan" WHERE user_id = $1`,
         [targetId],
       );
       const items = await client.query<{ item_id: string; quantity: number }>(
