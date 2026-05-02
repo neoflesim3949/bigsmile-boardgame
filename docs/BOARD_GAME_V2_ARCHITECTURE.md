@@ -458,7 +458,7 @@
 | `/transfer` | 玩家 | 玩家轉帳（輸入完整 ID 或 QR 掃碼查詢後轉帳） |
 | `/history/[type]` | 玩家 | 四項數值明細（type = `money` / `health` / `blessing` / `karma`）；福分 / 業力受 `ShowAllStats` 與 `BoardConfig.final_scoring_triggered_at` 雙重控管 |
 | `/settings` | 玩家 | 玩家個人偏好設定（字體大小、深色 / 淺色模式，設定值存於 localStorage，預設深色模式） |
-| `/display/board` | 活動看板 | 公開展示，需 display token，**永遠深色強制**，pointer-events-none 防誤觸。版型分四區：(1) **Header（10vh）**：logo + 標題 + 第 N 回合 + 時鐘 (HH:MM:SS \| MM/DD) + 已連線 + 「展開最終榜單」toggle 按鈕；(2) **左欄（48%）「重點趨勢」**：包在 glass-panel 外框內，內部 `grid-cols-3 grid-rows-2` 最多 6 檔 featured 商品（含 canvas sparkline）；(3) **中欄（flex-1）「行情總表」**：所有 visible 商品列表（代碼/名稱、價格、漲跌 % + 箭頭）；(4) **右欄（20%）「風雲榜」**：每回合 tickRound 後更新，常規模式只顯示前 10 名 rank + 玩家姓名（**不顯示分數**保持神祕感），rank 1-3 金/銀/銅獎牌；(5) **Footer（15vh）**：上半「大會事件」事件輪播、下半「跑馬燈公告」滾動。**最終結算模式**：左 + 中欄隱藏，右欄擴展為全寬，欄位展開為「金錢/福分/健康/業力/重生次數/最終分數」 |
+| `/display/board` | 活動看板 | 公開展示，需 display token，**永遠深色強制**，pointer-events-none 防誤觸。版型分四區：(1) **Header（10vh）**：logo + 標題 + 第 N 回合 + 時鐘 (HH:MM:SS \| MM/DD) + 已連線 + 「展開最終榜單」toggle 按鈕；(2) **左欄（56%）「重點趨勢」**：包在 glass-panel 外框內，內部 `grid-cols-3 grid-rows-2` 最多 6 檔 featured 商品（含 canvas sparkline）；(3) **中欄（flex-1 約 32%）「行情總表」**：所有 visible 商品列表（代碼/名稱、價格、漲跌 % + 箭頭）；(4) **右欄（12%）「風雲榜」**：窄欄只放 rank + 姓名。每回合 tickRound 後更新，常規模式只顯示前 10 名 rank + 玩家姓名（**不顯示分數**保持神祕感），rank 1-3 金/銀/銅獎牌；(5) **Footer（15vh）**：上半「大會事件」事件輪播、下半「跑馬燈公告」滾動。**最終結算模式**：左 + 中欄隱藏，右欄擴展為全寬，欄位展開為「金錢/福分/健康/業力/重生次數/最終分數」 |
 
 > 採用 Next.js App Router，每個頁面為獨立 route，不使用全屏疊層彈窗的進入模式。
 > middleware 依 `Account.role` 強制路由保護：非 admin 不能進 `/admin/*`、非 captain 不能進 `/captain/*`、非 player 不能進 `/`、`/stock`。

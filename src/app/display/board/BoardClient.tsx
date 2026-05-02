@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ArrowDownRight, Megaphone, CalendarDays, ArrowUpDown } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Megaphone, CalendarDays, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { getBoardData, type BoardData } from '@/app/actions/board';
 
 interface Props {
@@ -16,6 +16,14 @@ export default function BoardClient({ initial, token }: Props) {
   const [now, setNow] = useState(Date.now());
   const [eventIdx, setEventIdx] = useState(0);
   const [forceFinal, setForceFinal] = useState(false);
+  /** 終局榜單表頭排序欄位（排名固定不可選；預設 final_score 由大到小） */
+  const [sortKey, setSortKey] = useState<'final_score' | 'money' | 'blessing' | 'health' | 'karma' | 'rebirth_count'>('final_score');
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+
+  function toggleSort(k: typeof sortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSortKey(k); setSortDir('desc'); }
+  }
 
   // 強制深色 root（CLAUDE.md §6.2）
   useEffect(() => {
@@ -62,7 +70,18 @@ export default function BoardClient({ initial, token }: Props) {
 
   const featured = data.stocks.filter((s) => data.featured_stock_ids.includes(s.id)).slice(0, 6);
   const visibleAll = data.stocks.filter((s) => s.is_visible);
-  const lbFinal = data.finalLeaderboard ?? [];
+  // 終局榜單：先依 final_score 由大到小綁固定 rank（V2.md §8 名次固定原則）
+  // 之後不論點哪一欄排序，玩家身上的 rank 數字都不會變
+  const lbFinalRanked = (data.finalLeaderboard ?? [])
+    .slice()
+    .sort((a, b) => b.final_score - a.final_score)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+  // 依使用者選擇的欄位重排顯示順序（rank 欄位本身不可選）
+  const lbFinalSorted = lbFinalRanked.slice().sort((a, b) => {
+    const av = a[sortKey] ?? 0;
+    const bv = b[sortKey] ?? 0;
+    return sortDir === 'desc' ? bv - av : av - bv;
+  });
   const lbLive = data.liveLeaderboard ?? [];
 
   const dt = new Date(now);
@@ -111,7 +130,7 @@ export default function BoardClient({ initial, token }: Props) {
 
       <main className="flex-1 flex px-8 py-8 gap-6 h-[75vh] pointer-events-none">
         {!isFinal && (
-          <div className="w-[48%] glass-panel rounded-3xl p-6 flex flex-col border border-zinc-800 transition-all duration-500">
+          <div className="w-[56%] glass-panel rounded-3xl p-6 flex flex-col border border-zinc-800 transition-all duration-500">
             <h2 className="text-2xl font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-4 uppercase tracking-widest">
               重點趨勢
             </h2>
@@ -183,40 +202,41 @@ export default function BoardClient({ initial, token }: Props) {
           </div>
         )}
 
-        <div className={`${isFinal ? 'w-full' : 'w-[20%]'} glass-panel rounded-3xl ${isFinal ? 'p-8' : 'p-4'} flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
+        <div className={`${isFinal ? 'w-full' : 'w-[12%]'} glass-panel rounded-3xl ${isFinal ? 'p-8' : 'p-3'} flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
           {isFinal && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500"></div>}
-          <h2 className={`font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 ${isFinal ? 'mb-6' : 'mb-4'} uppercase tracking-widest flex justify-between items-end ${isFinal ? 'text-4xl py-2' : 'text-lg'}`}>
+          <h2 className={`font-bold text-zinc-400 ${isFinal ? 'pl-4 border-l-4 mb-6 text-4xl py-2' : 'pl-2 border-l-2 mb-3 text-sm'} border-amber-500 uppercase tracking-widest flex justify-between items-end`}>
             <span className="text-zinc-100">🏆 風雲榜</span>
             {isFinal && <span className="text-xl font-normal text-zinc-500 normal-case tracking-normal">
               {data.config.final_scoring_triggered_at ? '最終結算成績' : '即時概況'}
             </span>}
           </h2>
           <div className="flex-1 overflow-y-auto no-scrollbar">
-            <table className={`w-full text-left ${isFinal ? 'text-xl' : 'text-base'}`}>
+            <table className={`w-full text-left ${isFinal ? 'text-xl' : 'text-xs'}`}>
               <thead className="sticky top-0 bg-zinc-900/95 backdrop-blur-sm z-20 shadow-md">
                 <tr className="text-zinc-500 border-b-2 border-zinc-800">
-                  <th className={`pb-3 font-normal text-center ${isFinal ? 'w-20' : 'w-12'}`}>排名</th>
-                  <th className="pb-3 font-normal pl-3">玩家姓名</th>
+                  <th className={`pb-2 font-normal text-center ${isFinal ? 'w-20' : 'w-8'}`}>排名</th>
+                  <th className={`pb-2 font-normal ${isFinal ? 'pl-4' : 'pl-2'}`}>姓名</th>
                   {isFinal && (
                     <>
-                      <SortTh title="金錢" color="amber" />
-                      <SortTh title="福份" color="teal" />
-                      <SortTh title="健康" color="rose" />
-                      <SortTh title="業力" color="purple" />
-                      <SortTh title="重生次數" color="zinc" />
-                      <SortTh title="最終分數" color="white" emphasized />
+                      <SortTh title="金錢" color="amber" sortKey="money" active={sortKey === 'money'} dir={sortDir} onClick={toggleSort} />
+                      <SortTh title="福份" color="teal" sortKey="blessing" active={sortKey === 'blessing'} dir={sortDir} onClick={toggleSort} />
+                      <SortTh title="健康" color="rose" sortKey="health" active={sortKey === 'health'} dir={sortDir} onClick={toggleSort} />
+                      <SortTh title="業力" color="purple" sortKey="karma" active={sortKey === 'karma'} dir={sortDir} onClick={toggleSort} />
+                      <SortTh title="重生次數" color="zinc" sortKey="rebirth_count" active={sortKey === 'rebirth_count'} dir={sortDir} onClick={toggleSort} />
+                      <SortTh title="最終分數" color="white" emphasized sortKey="final_score" active={sortKey === 'final_score'} dir={sortDir} onClick={toggleSort} />
                     </>
                   )}
                 </tr>
               </thead>
               <tbody className="text-zinc-200">
-                {(isFinal ? lbFinal.length : lbLive.length) === 0 ? (
+                {(isFinal ? lbFinalSorted.length : lbLive.length) === 0 ? (
                   <tr>
                     <td colSpan={isFinal ? 8 : 2} className="py-12 text-center text-zinc-600">尚無玩家資料</td>
                   </tr>
                 ) : isFinal ? (
-                  lbFinal.map((r, i) => {
-                    const rank = i + 1;
+                  lbFinalSorted.map((r) => {
+                    // rank 永遠跟著 final_score（V2.md §8 名次固定原則）
+                    const rank = r.rank;
                     return (
                       <tr key={r.user_id} className="border-b border-zinc-800/60">
                         <td className="py-4 text-center w-20">
@@ -251,9 +271,9 @@ export default function BoardClient({ initial, token }: Props) {
                     const rank = i + 1;
                     return (
                       <tr key={r.user_id} className="border-b border-zinc-800/60">
-                        <td className="py-3 text-center w-16">
+                        <td className="py-2 text-center w-8">
                           {rank <= 3 ? (
-                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-black text-base shadow-lg ${
+                            <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-black text-xs shadow-lg ${
                               rank === 1 ? 'bg-yellow-400 text-yellow-900 shadow-yellow-400/20'
                                 : rank === 2 ? 'bg-zinc-300 text-zinc-800'
                                 : 'bg-amber-600 text-amber-100'
@@ -261,10 +281,10 @@ export default function BoardClient({ initial, token }: Props) {
                               {rank}
                             </span>
                           ) : (
-                            <span className="font-bold text-zinc-500 text-xl">{rank}</span>
+                            <span className="font-bold text-zinc-500 text-sm">{rank}</span>
                           )}
                         </td>
-                        <td className={`py-3 pl-3 font-bold text-lg tracking-wide truncate ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
+                        <td className={`py-2 pl-2 font-bold text-sm tracking-tight truncate ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
                           {r.name}
                         </td>
                       </tr>
@@ -319,7 +339,19 @@ export default function BoardClient({ initial, token }: Props) {
   );
 }
 
-function SortTh({ title, color, emphasized = false }: { title: string; color: string; emphasized?: boolean }) {
+type FinalSortKey = 'final_score' | 'money' | 'blessing' | 'health' | 'karma' | 'rebirth_count';
+
+function SortTh({
+  title, color, emphasized = false, sortKey, active, dir, onClick,
+}: {
+  title: string;
+  color: string;
+  emphasized?: boolean;
+  sortKey: FinalSortKey;
+  active: boolean;
+  dir: 'asc' | 'desc';
+  onClick: (k: FinalSortKey) => void;
+}) {
   const map: Record<string, string> = {
     amber: 'hover:text-amber-500',
     teal: 'hover:text-teal-500',
@@ -328,10 +360,17 @@ function SortTh({ title, color, emphasized = false }: { title: string; color: st
     zinc: 'hover:text-zinc-300',
     white: 'hover:text-white',
   };
+  const Indicator = active ? (dir === 'desc' ? ArrowDown : ArrowUp) : ArrowUpDown;
   return (
-    <th className={`pb-3 text-right ${map[color] ?? ''} group transition-colors ${emphasized ? 'text-amber-500' : ''}`}>
+    <th
+      onClick={() => onClick(sortKey)}
+      className={`pb-3 text-right ${map[color] ?? ''} group transition-colors cursor-pointer pointer-events-auto select-none ${
+        active ? 'text-amber-300' : (emphasized ? 'text-amber-500' : '')
+      }`}
+    >
       <div className={`flex items-center justify-end gap-1 ${emphasized ? 'font-bold' : ''}`}>
-        {title} <ArrowUpDown className="w-4 h-4 opacity-0 group-hover:opacity-100" />
+        {title}
+        <Indicator className={`w-4 h-4 ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
       </div>
     </th>
   );
