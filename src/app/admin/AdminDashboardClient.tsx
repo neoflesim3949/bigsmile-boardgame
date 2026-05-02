@@ -293,7 +293,8 @@ export default function AdminDashboardClient({ initial }: Props) {
             <p className="text-xs text-zinc-500 mb-4">點擊「下一回合」會推進股價、結算所有借款利息（單條批次 SQL）。30 秒節流。</p>
             <button
               onClick={handleTick}
-              disabled={busy || data.scoring.enabled}
+              disabled={busy || data.scoring.enabled || !data.flags.game_enabled}
+              title={!data.flags.game_enabled ? '遊戲尚未開始' : data.scoring.enabled ? '已計分' : ''}
               className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)] mb-3 min-h-[44px]"
             >
               {busy ? '處理中…' : '推進下一回合'}

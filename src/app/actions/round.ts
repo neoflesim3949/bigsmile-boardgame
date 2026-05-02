@@ -20,6 +20,20 @@ export async function tickRound(): Promise<
 
     // ─── Tx 1：股價 + 回合計數（含 30 秒節流，原子 SQL 防誤點）───
     const tx1 = await withTx(async (client) => {
+      // 遊戲未開始 / 已結算 不允許推進回合
+      const flagsR = await client.query<{ key: string; value: string }>(
+        `SELECT key, value FROM "AppSettings" WHERE key = 'BoardGameEnabled'`,
+      );
+      if (flagsR.rows[0]?.value !== 'true') {
+        throw new ActionError('FORBIDDEN', '遊戲尚未開始，請先按「遊戲開始」');
+      }
+      const finalR = await client.query<{ final_scoring_triggered_at: string | null }>(
+        `SELECT final_scoring_triggered_at FROM "BoardConfig" WHERE id = 1`,
+      );
+      if (finalR.rows[0]?.final_scoring_triggered_at) {
+        throw new ActionError('FORBIDDEN', '終局結算已觸發，無法再推進回合');
+      }
+
       const upd = await client.query<{ current_round: number }>(
         `UPDATE "BoardConfig"
          SET current_round = current_round + 1,
