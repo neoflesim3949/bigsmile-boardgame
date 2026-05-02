@@ -44,10 +44,13 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
 
   function handleSaveBoard() {
     if (!board) return;
+    // 儲存前過濾掉已不存在的股票 ID（被刪除的商品殘留），避免 DB 累積無效 reference
+    const validStockIds = new Set(stocks.map((s) => s.id));
+    const cleanFeatured = board.featured_stock_ids.filter((id) => validStockIds.has(id));
     boardBusyTransition(async () => {
       const r = await updateBoardConfig({
         title: board.title,
-        featured_stock_ids: board.featured_stock_ids,
+        featured_stock_ids: cleanFeatured,
         color_scheme: board.color_scheme,
         event_rotate_seconds: board.event_rotate_seconds,
       });
@@ -83,13 +86,15 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
 
   function toggleFeatured(stockId: string) {
     if (!board) return;
-    const cur = board.featured_stock_ids;
+    // 過濾掉已不存在於 stocks（被刪除）的殘留 ID — 不佔配額
+    const validStockIds = new Set(stocks.map((s) => s.id));
+    const cur = board.featured_stock_ids.filter((id) => validStockIds.has(id));
     if (cur.includes(stockId)) {
       setBoard({ ...board, featured_stock_ids: cur.filter((x) => x !== stockId) });
-    } else if (cur.length < 4) {
+    } else if (cur.length < 6) {
       setBoard({ ...board, featured_stock_ids: [...cur, stockId] });
     } else {
-      showToast(false, '最多 4 檔');
+      showToast(false, '最多 6 檔');
     }
   }
 
@@ -200,7 +205,7 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-zinc-400 mb-1">
-                    重點曲線商品（最多 4 檔，已選 {board.featured_stock_ids.length}/4）
+                    重點曲線商品（最多 6 檔，已選 {board.featured_stock_ids.filter((id) => stocks.some((s) => s.id === id)).length}/6）
                   </label>
                   <div className="space-y-1 max-h-40 overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-lg p-2">
                     {stocks.length === 0 ? (

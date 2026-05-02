@@ -62,8 +62,10 @@ export async function tickRound(): Promise<
         let newPrice: number;
         if (script) {
           if (script.change_type === 'fixed') {
-            newPrice = Math.max(1, script.change_value);
+            // fixed 允許設 0（admin 故意安排的暴跌劇情）— 但 buyStock 端會擋玩家買 price=0 的股票
+            newPrice = Math.max(0, script.change_value);
           } else {
+            // percent 漲跌 floor=1 防止向下無限
             newPrice = Math.max(1, Math.round(s.current_price * (1 + script.change_value / 100)));
           }
         } else {

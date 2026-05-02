@@ -1097,7 +1097,7 @@ export async function getBoardConfig(): Promise<ActionResult<BoardConfigRow>> {
 
 const boardConfigSchema = z.object({
   title: z.string().min(1).max(60),
-  featured_stock_ids: z.array(z.uuid()).max(4),
+  featured_stock_ids: z.array(z.uuid()).max(6),
   color_scheme: z.enum(['red_up', 'green_up']),
   event_rotate_seconds: z.number().int().min(1).max(60),
 });

@@ -134,6 +134,8 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
       const price = stock.rows[0].current_price;
       const stockCode = stock.rows[0].code;
       const stockName = stock.rows[0].name;
+      // 防呆：fixed=0 劇情下不允許玩家 free 買進
+      if (price <= 0) throw new ActionError('FORBIDDEN', '此商品目前停止交易（價格為 0）');
       const cost = price * data.shares;
 
       const ps = await client.query<{ money: number; health: number; blessing: number }>(

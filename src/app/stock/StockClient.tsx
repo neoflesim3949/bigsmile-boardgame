@@ -233,10 +233,11 @@ function StockCard({
       <div className="flex gap-2">
         <button
           onClick={onBuy}
-          disabled={writeDisabled}
+          disabled={writeDisabled || stock.current_price <= 0}
+          title={stock.current_price <= 0 ? '此商品目前停止交易' : ''}
           className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 py-2 rounded-lg font-bold text-sm min-h-[44px]"
         >
-          買進
+          {stock.current_price <= 0 ? '停止交易' : '買進'}
         </button>
         <button
           onClick={onSell}
@@ -277,7 +278,8 @@ function TradeModal({
 
   const n = Math.max(0, Math.floor(Number(shares) || 0));
   const total = n * stock.current_price;
-  const maxBuyShares = Math.floor(myMoney / stock.current_price);
+  // price=0 時 maxBuyShares 為 Infinity 沒意義；改 0 防 disable 計算 NaN
+  const maxBuyShares = stock.current_price > 0 ? Math.floor(myMoney / stock.current_price) : 0;
   const maxSellShares = stock.shares;
 
   function handleSubmit() {
