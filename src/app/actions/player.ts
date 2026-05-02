@@ -42,6 +42,8 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
     }
 
     const result = await withTx(async (client) => {
+      await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
       // 確保未抽過（idempotency）
       const existing = await client.query<{ destiny_name: string | null }>(
         `SELECT destiny_name FROM "PlayerStats" WHERE user_id = $1 FOR UPDATE`,
@@ -494,7 +496,8 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
 
       const totalCost = opt.rows[0].blessing_cost_per_unit * data.units;
       const totalGain = effectivePerUnit * data.units;
-      if (me.blessing < totalCost) throw new ActionError('INSUFFICIENT_FUNDS', '福報不足');
+      // 對齊 CLAUDE.md §6.2：/exchange 禁止前台顯示福報訊息，錯誤訊息用「條件不符」
+      if (me.blessing < totalCost) throw new ActionError('INSUFFICIENT_FUNDS', `額度不足（最多可換 ${Math.floor(me.blessing / opt.rows[0].blessing_cost_per_unit)} 單位）`);
 
       const upd = await client.query<{ money: number; blessing: number }>(
         `UPDATE "PlayerStats"

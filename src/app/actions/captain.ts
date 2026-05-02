@@ -333,6 +333,8 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
     const data = applySchema.parse(p);
 
     const result = await withTx(async (client) => {
+      await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
       // 抓快捷模組 + 對應關卡（單一 SQL）
       const qa = await client.query<{
         id: string; station_id: string; owner_user_id: string;

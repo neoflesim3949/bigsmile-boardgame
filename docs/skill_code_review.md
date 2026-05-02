@@ -1,227 +1,229 @@
-# Code Review — 開運大富翁 V2
+# Code Review — 開運大富翁 V2（完整 codebase 掃描）
 
-> **審查範圍**：`493d790`（QR 掃碼 race fix）→ `05f70f9`（換匯倍率 fix）共 14 個 commit。
+> **審查範圍**：`src/**` 全部 59 個 .ts/.tsx 檔（不只最近 commit）
 > **審查日期**：2026-05-02
-> **審查方式**：本機 commit log 審視（無 PR 流程；專案直推 main + Vercel auto-deploy）。
+> **審查方式**：4 個並行 Agent 深度 review（Lib/Middleware、Server Actions、Admin/Captain UI、Player/Display/Auth UI）+ 主審驗證
 > **審查者**：Claude Opus 4.7
 
 ---
 
-## 1. 整體評價
+## 1. 執行摘要
 
-✅ **總體品質：良好**。最近一輪堆疊主要是 (a) 看板 UI 重排與排序、(b) 借款合約化、(c) 導覽模式真實鎖定寫入、(d) 換匯倍率前後端對齊。改動皆有對應文件同步（CLAUDE.md / ARCH §3 §5 §11）。
+✅ **整體品質：良好**。架構清晰、規範遵守（CLAUDE.md §3.3 N+1、§4 認證、§6 UI、§11 紅旗清單）。
 
-🟡 **主要風險**：schema 變更與多處 server action 同步、前後端公式對齊。已修的 bug 都是這類（rebirthPlayer SELECT 舊欄位、exchange 前端沒套 mult），仍需持續警覺。
-
-🔴 **必修項目**：無（線上 production 應可部署，但下方有幾個次要建議）。
-
----
-
-## 2. 通過的設計決策（值得保留）
-
-### 2.1 借款合約化（Schema 重構）— 正確
-**Migration 0004** 把 `PlayerLoan` 從 `(user_id, loan_option_id)` 累加改成「每筆借款獨立 row」。
-
-- ✅ 解決原本「還清後仍持續被收利息」的嚴重 bug（repayBank 沒同步減 units）。
-- ✅ 凍結 `base_interest_*` 欄位讓 BankLoanOption 後續被刪 / 改不影響歷史合約。
-- ✅ 部分還款利息按 `ROUND(base_interest * balance / principal)` 比例自動降，數學上正確。
-- ✅ 用 `ON DELETE SET NULL` 保留 option 被刪時的歷史合約。
-
-### 2.2 換匯倍率前後端公式對齊 — 正確
-`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用：
-```
-effective_per_unit = ROUND(money_gain_per_unit × multiplier)
-total = effective_per_unit × units
-```
-- ✅ 避免 rounding 差 1 元的爭議。
-- ✅ 前端「將獲得」與後端入帳保證一致。
-- ✅ `CLAUDE.md §11` 紅旗清單已加入規範。
-
-### 2.3 導覽模式（TourMode）真實鎖寫
-- ✅ 抽出 `assertNotTourMode(client?)` helper 放 `lib/auth.ts`，與 `assertNotDuringFinalScoring` 對稱。
-- ✅ 全部 8 處玩家 / 關主寫入 action 都套了（buyStock / sellStock / transferMoney / exchangeBlessing / borrow / repay / applyQuickAction / rebirthPlayer），grep 驗證 ok。
-- ✅ middleware 與 `app/page.tsx` 也跳過強制導向 onboarding。
-- ✅ 後端鎖死 + 前端 sky 色 banner 雙重保險。
-
-### 2.4 看板 layout 改進
-- ✅ 重點趨勢從「flex-col 2 張」→ `grid-cols-3 grid-rows-2` 最多 6 張。
-- ✅ 風雲榜常規模式即時更新（`liveLeaderboard` 補上去前是個漏洞，前台只在終局才有資料）。
-- ✅ 最終榜單 rank **永遠對應 final_score**，點其他欄位排序時 row 順序變但 rank 不變（V2.md §8 名次固定原則）。
-
-### 2.5 ZodError → INVALID_INPUT 自動轉
-`lib/error.ts` `fail()` 偵測 zod error 並轉中文欄位提示：
-- ✅ 不再吞成「伺服器發生錯誤」。
-- ✅ 中文欄位對照集中管理（user_id / login_id / password / role…）。
-
-### 2.6 重置系統的 5 步確認 + 雙重清明細
-- ✅ `restartGameCycle` 清玩家 Transaction + 額外清 admin 寫的 round_tick（`tx_type = 'round_tick'` 第二條 DELETE）。
-- ✅ 「重置會員明細」（DangerOp `reset_player_data`）也跟著清 Transaction，避免歷史殘留。
-- ✅ 5 步 modal UX 對齊危險區慣例。
+🟡 **發現的 critical bug**：3 個（已即修並驗證）
+🟡 **建議改進**：13 項，按優先排序
+🟢 **誤報**：3 項（agent 報但符合規格 / 已正確設計）
 
 ---
 
-## 3. 發現的問題與建議
+## 2. 已修的 Critical Bug
 
-### 3.1 🟡 `round_tick` 沒有 TX_TYPE_LABEL 對照
-**位置**：`src/app/history/[type]/HistoryClient.tsx:14`
-
-`TX_TYPE_LABEL` 物件沒有 `round_tick` 鍵，admin 帳號若有歷史頁會看到 raw 字串「round_tick」而非中文。
-
-**目前影響**：低 — 只有 admin 帳號的 Transaction 撈得到，且現行沒有 admin 個人歷史頁。但 `getMyHistory` 會撈 `WHERE user_id = $1`，admin 用自己 id 進歷史頁就會看到。
-
-**建議**：加一行
-```ts
-round_tick: '系統推進回合',
-```
-
-### 3.2 🟡 看板欄寬 56 + 32 + 12 = 100%，但有 `gap-6`
-**位置**：`src/app/display/board/BoardClient.tsx:120` 左右
-
-`<main>` 是 `flex` + `gap-6`（24px），子元素用 `w-[56%]` / `flex-1` / `w-[14%]`。flexbox 會自動壓縮，視覺上沒問題，但理論值總和會超過 100%。
-
-**建議**（如果未來有對齊強迫症）：把 `w-[56%]` 改成 `flex-[0_0_56%]` + 中欄 `flex-1`，確保比例固定且 gap 從 flex-1 扣。目前運作正常可不改。
-
-### 3.3 🟡 `liveLeaderboard` 與 `finalLeaderboard` 重複查 PlayerStats
-**位置**：`src/app/actions/board.ts:108-145`
-
-兩個 leaderboard 都跑一次 `SELECT a.user_id, a.name, ps.* FROM Account JOIN PlayerStats LIMIT 500`。終局結算後同時跑 → 兩次相同 query。
-
-**目前影響**：低 — 500 列 query <50ms，60s poll 一次。
-
-**建議**：終局結算後 `liveLeaderboard` 與 `finalLeaderboard` 共用一次 raw query 算兩種排序。優化空間 ≤ 30ms，priority low。
-
-### 3.4 🟡 `assertNotTourMode` + `assertNotDuringFinalScoring` 兩次查 settings
-**位置**：`lib/auth.ts:153, 165`
-
-每個寫入 action 開頭兩個 helper 各自查一次 AppSettings / BoardConfig。
-
-**目前影響**：每個寫入多 2 個 ms 級 query。500 人 × 12 回合 × 多次寫入 → 加總可控。
-
-**建議**（可選）：合併成 `assertCanWrite()` 一條 SQL 同時查兩個 row：
-```sql
-SELECT
-  (SELECT final_scoring_triggered_at FROM "BoardConfig" WHERE id = 1),
-  (SELECT value FROM "AppSettings" WHERE key = 'TourMode')
-```
-省一次 round-trip。priority low。
-
-### 3.5 🟡 PlayerLoan migration 0004 用 `DROP TABLE`
-**位置**：`supabase/migrations/0004_loan_contracts.sql`
-
-`DROP TABLE IF EXISTS "PlayerLoan"` 會丟掉所有舊借款資料。
-
-**目前影響**：開發階段且舊 schema 本來就有 bug（永遠扣息），舊資料留著反而有害。
-
-**建議**：在 migration 檔頂部加更明顯的警告 comment，並在 `DEPLOY.md`（如有）標註此次升級需「重置會員明細」。
-
-### 3.6 🟢 風雲榜 14% 寬度對 4 字以上中文姓名 truncate
-**位置**：`src/app/display/board/BoardClient.tsx`
-
-`truncate` class 會切。3 字以下安全，4 字以上會看到「...」。
-
-**建議**：保留 truncate（避免 layout 爆），但活動前提醒玩家姓名 ≤ 4 字。或在後台 `accounts` 編輯頁加 max length hint。
-
-### 3.7 🟢 自訂倍率 modal 沒檢查 step rounding
-**位置**：`AdminDashboardClient.tsx` 自訂 modal
-
-input `step="0.01"` 但實際儲存 `multiplier.toFixed(2)`，如果 admin 輸入 `1.123` 會被 truncate 到 `1.12`（不是 round）。
-
-**目前影響**：低 — admin 通常輸入整 0.05 / 0.1 倍。
-
-**建議**：在 submit 前 `Math.round(v * 100) / 100`。
-
-### 3.8 🟢 `tickRound` 內 INSERT round_tick 在交易內
-**位置**：`src/app/actions/round.ts:99-110`
-
-✅ 寫進 Tx1 內，原子性正確（推進失敗不會留歷史）。
-✅ payload 含 `round / event_text / game_started_at`，dashboard 能算遊戲時間。
-
-無需改動。
-
-### 3.9 🟢 `5 step confirm modal` 沒 typed confirmation
-**位置**：`AdminDashboardClient.tsx` RestartConfirmModal
-
-5 步點 Next 都是預設 focus 同一個按鈕，user 一直按 Enter 就會 5 秒內走完。
-
-**目前影響**：要按 5 次點擊，誤觸機率 ≪ 1 次。
-
-**建議**：可選加「請輸入『確認重置』」typed confirmation 在最後一步。priority low（5 步 + 強烈紅色 + 5 秒間隔已足夠）。
+| 檔案 | 問題 | 狀態 |
+|------|------|------|
+| [player.ts](../src/app/actions/player.ts) `drawDestiny` | 缺 `assertNotDuringFinalScoring` + `assertNotTourMode`，TourMode 中可抽卡，終局結算後也能抽 | ✅ 已修 |
+| [captain.ts](../src/app/actions/captain.ts) `applyQuickAction` | 同上，TourMode 中關主仍可改玩家數據 | ✅ 已修 |
+| [player.ts](../src/app/actions/player.ts) `exchangeBlessing` 錯誤訊息 | 「**福報不足**」直接洩漏福報資訊，違反 CLAUDE.md §6.2 | ✅ 已改成「額度不足（最多可換 N 單位）」 |
 
 ---
 
-## 4. 安全審查
+## 3. P2 — 建議近期修
+
+### 3.1 🟡 `db.ts` SSL `rejectUnauthorized: false`（[db.ts:19](../src/lib/db.ts#L19)）
+- **風險**：理論上 MITM 可插件 Vercel ↔ Supabase 之間的流量
+- **緩解**：實務上 AWS 內網插件難度極高
+- **建議**：改 `rejectUnauthorized: true` + 配 Supabase root cert
+- **詳見**：[safety_report.md §4.1](safety_report.md)
+
+### 3.2 🟡 `assertNotTourMode` 直接打 DB 而非走 `getSetting` helper
+- **位置**：[lib/auth.ts:165](../src/lib/auth.ts#L165)
+- **問題**：違反 CLAUDE.md §5「禁止直接 from('AppSettings').select() 跳過 helper」的精神
+- **影響**：低 — 仍 parameterized 不會 SQL injection；但繞過 helper 的 cache / 預設值機制
+- **建議**：改用 `getSetting('TourMode')`
+
+### 3.3 🟡 `getBoardData` 兩次重複查 ScoreWeight settings
+- **位置**：[board.ts:124-131](../src/app/actions/board.ts) 與 [board.ts:154-161](../src/app/actions/board.ts)
+- **問題**：`liveLeaderboard` 跟 `finalLeaderboard` 各跑一次相同的 settings query
+- **建議**：合併成單次 query 共享 weights
+
+### 3.4 🟡 SessionPayload role enum 沒驗證
+- **位置**：[lib/auth.ts](../src/lib/auth.ts) `verifyAccessToken`
+- **問題**：JWT 解碼出 role 後沒驗證是否屬於 `['admin', 'player', 'captain']`
+- **影響**：實務風險低（AUTH_SECRET 不外流就無法偽造），但是 defense in depth
+- **建議**：`if (!['admin','player','captain'].includes(decoded.role)) return null`
+
+### 3.5 🟡 `setSetting` audit log 跳過
+- **位置**：[lib/settings.ts:109-115](../src/lib/settings.ts)
+- **問題**：`actorUserId` 為 null 時不寫 Transaction 稽核
+- **建議**：改用 system actor id（如 `'__system__'`）一律記錄
+
+### 3.6 🟡 `transferMoney` 手續費 `feeRate` 不驗 NaN
+- **位置**：[player.ts:350](../src/app/actions/player.ts)
+- **問題**：`Number(getSetting('TransferFeeRate'))` 若設定值是 'abc' → NaN 沿用
+- **建議**：`if (!Number.isFinite(feeRate)) feeRate = 0`
+
+### 3.7 🟡 `tickRound` 沒驗 `assertNotDuringFinalScoring`
+- **位置**：[round.ts:15](../src/app/actions/round.ts)
+- **問題**：admin 在終局結算後仍可推進回合（會繼續扣利息與更新股價）
+- **影響**：admin 是上帝權限可考慮允許，但 tickRound 後玩家寫入仍被 final scoring 鎖死，導致狀態不一致
+- **建議**：tx 開頭加 `assertNotDuringFinalScoring(client)`
+
+### 3.8 🟡 `round_tick` 沒進 `TX_TYPE_LABEL` 對照
+- **位置**：[history/[type]/HistoryClient.tsx:14](../src/app/history/[type]/HistoryClient.tsx#L14)
+- **問題**：admin 看自己歷史頁會看到 raw 字串「round_tick」
+- **建議**：加一行 `round_tick: '系統推進回合'`
+
+### 3.9 🟡 admin / captain `window.confirm()` 大量使用（12+ 處）
+- **影響檔案**：accounts、events、finance、items、stations、stocks、captain/scan、captain/actions
+- **問題**：mobile Safari / 部分桌面 Chrome 可能擋 `window.confirm`
+- **建議**：抽出 `<ConfirmModal>` 通用元件取代
+
+### 3.10 🟡 PlayerHomeClient 觸控目標 < 44px
+- **位置**：[PlayerHomeClient.tsx](../src/app/PlayerHomeClient.tsx) 「重新整理」與「設定」按鈕 `w-10 h-10` = 40px
+- **建議**：`w-11 h-11`（44px）或包 `min-h-[44px]`
+
+### 3.11 🟡 BoardClient table header 字級 < 24px
+- **位置**：[display/board/BoardClient.tsx:163](../src/app/display/board/BoardClient.tsx)
+- **問題**：`text-xl`（20px）小於規格 ≥ 24px
+- **影響**：低 — 標題列字小可接受，數值列已 `text-2xl/3xl`
+- **建議**：可改 `text-2xl`，或保留現狀（標題列規格沒嚴格定義）
+
+### 3.12 🟡 兩處 N+1（N 是固定 small constant）
+- 詳見 [N+1_report.md](N+1_report.md)
+- 1. `tickRound` 對每檔股票 2 query（N ≤ 10）
+- 2. `updateAppSettings` 對每個 setting（N ≤ 20）
+- **不值得優化**（影響 < 1 秒）
+
+### 3.13 🟡 自訂倍率 input 不標準化 rounding
+- **位置**：[AdminDashboardClient.tsx](../src/app/admin/AdminDashboardClient.tsx) submitCustomMultiplier
+- **問題**：`step="0.01"` 但 admin 輸入 `1.123` 會被 `toFixed(2)` truncate
+- **建議**：`Math.round(v * 100) / 100`
+
+---
+
+## 4. P3 — 可延後 / 性能微調
+
+### 4.1 `qr.ts` nonce 用 8 bytes，可升 16
+- 實務上 8 bytes (~10^19 entropy) 已遠超暴力可能，無實質風險
+- 建議僅出於 defense in depth
+
+### 4.2 `error.ts` `isZodError` structural check 可加深
+- 目前只檢查 `issues` 是陣列；可加 `issues[0].code` 等
+- 風險低（zod 自家 error 必有此 shape）
+
+### 4.3 `boardData` LIMIT 寫死數字
+- LIMIT 30 events / 500 leaderboard 寫死，未來活動人數變動需改 code
+- 建議移到 AppSettings
+
+### 4.4 stock `trend` 30 分鐘 window 寫死
+- [stock.ts:46](../src/app/actions/stock.ts) `now() - interval '30 minutes'`
+- 對齊 round 推進頻率合理，但寫死
+
+### 4.5 `getAdminDashboard` 兩次 settings query
+- 第二次只是要 `BoardGameStartedAt` 算遊戲時間
+- 可一次拉所有需要的 settings
+
+### 4.6 admin 各頁缺 button disabled 狀態
+- 多處 form submit 沒在 `busyTransition` 期間 disable，雙擊可能 race
+- React `useTransition` 已內建防止 re-entry，但是 belt & suspenders
+
+---
+
+## 5. ❌ Agent 誤報（不是 bug）
+
+### 5.1 BankClient 顯示「每回合利息」是合規的
+- agent 認為違反「禁顯示福報」
+- 實際：顯示的是 `interest_money_per_round`（**金錢利息**），CLAUDE.md §6.2 只禁止福分相關
+- BankClient 從未顯示 blessing 扣除量 ✓
+
+### 5.2 admin operation 不該被 TourMode 擋
+- agent 報 `performDangerOp` / `restartGameCycle` 缺 `assertNotTourMode`
+- 實際：admin 是上帝權限，應在任何模式下可操作（包括 TourMode 中重置系統）
+- 設計正確
+
+### 5.3 看板 final leaderboard 顯示福分業力是規格
+- agent 誤以為「常規模式只顯示 rank+name」應用到 final mode
+- 實際：規格規定**結算後**展開全部欄位（V2.md §8 名次固定原則 + 全欄位顯示）
+- 設計正確
+
+---
+
+## 6. 安全審查（更詳細見 [safety_report.md](safety_report.md)）
 
 | 項目 | 狀態 |
 |------|------|
-| Server Action session 驗證 | ✅ 全部走 `requireRole(...)` |
-| SQL injection | ✅ 全 parameterized query，無字串拼接 |
-| dangerouslySetInnerHTML | ✅ 沒用到 |
-| NEXT_PUBLIC_ 前綴敏感 key | ✅ AUTH_SECRET / DB_URL 都 server-only |
-| 重生路徑限制 | ✅ 雙重保險：前端 `scanned.source === 'manual'` 不顯示按鈕 + 後端 `rebirthPlayer` 只收 qrToken 不收 userId |
-| 玩家 QR token TTL | ✅ HMAC + nonce + exp，預設 5 分鐘 |
-| TourMode 鎖寫入 | ✅ 8 處寫入 action 都驗了 |
-| ScannedState `source` 前端傳遞 | ⚠️ `source: 'qr'` / `'manual'` 是 client state；後端已防呆，但 client 可被改 — 由於 rebirthPlayer 後端只收 qrToken，繞過無效 |
-| ZodError 不洩漏 | ✅ 只回欄位中文 + 規則描述，不含 SQL / 內部資訊 |
+| 全程 TLS（瀏覽器 ↔ Vercel ↔ Supabase）| ✅ |
+| bcrypt cost=12 | ✅ |
+| HMAC-SHA256 token（JWT / QR / Display）| ✅ |
+| Cookie httpOnly + secure（production）| ✅ |
+| Server action 全 `requireRole(...)` 開頭 | ✅ |
+| SQL parameterized（無字串拼接）| ✅ |
+| 玩家輸入無 dangerouslySetInnerHTML | ✅ |
+| Secrets 無 NEXT_PUBLIC_ 前綴洩漏 | ✅ |
+| 重生雙保險（前端 source check + 後端只收 qrToken）| ✅ |
+| Rate limit per-account（登入 5/分鐘）| ✅ |
 
-**結論**：通過。
-
----
-
-## 5. 效能審查
-
-| 指標 | 評估 |
-|------|------|
-| `getMyStats` p95 | < 100ms（單列 SELECT + settings + items 嵌套）|
-| `tickRound` 推進 | Tx1 ~ Stock 數 × 2 query + 1 INSERT；Tx2 一條批次 SQL；總 < 500ms（10 檔股票時）|
-| `getBoardData` 60s poll | ~150ms（5 條 SELECT + 嵌套 history + leaderboard JS sort）|
-| `getAdminDashboard` | ~250ms（counts + board + settings + leaderboard 500 + tickHistory 10）|
-| `applyQuickAction` | ~100ms（單條 tx，no N+1）|
-| `buyStock` / `sellStock` | ~80ms（單條 tx，不鎖 Stock row）|
-
-**N+1 自審通過**。`SELECT ... FROM ... WHERE ... IN (...)` 與嵌套 select 都正確使用。
-
-**500 人同時在線壓力點**：
-- 玩家進頁面 / 下拉刷新（不輪詢）→ 主動操作流量
-- 看板 60s fallback poll → 每分鐘 1 次 / display
-- 預估峰值 ≈ 8 req/s，在效能目標 < 300ms p95 內有充足 headroom
+**通過**。唯一小加固是 `db.ts` SSL cert 驗證（§3.1）。
 
 ---
 
-## 6. 文件對齊
+## 7. 效能審查（更詳細見 [testspeed.md](testspeed.md)）
+
+實測 500 並發（pool=200, 6543 PgBouncer）：
+- 抽卡 p95 ~6.5s（受 Free tier server-side cap）
+- 買股 p95 ~7.5s（同上）
+- 排行榜 p95 165ms ✅
+- **0 錯誤、資料 100% 一致**
+
+**N+1 自審通過**（[N+1_report.md](N+1_report.md)）。
+
+---
+
+## 8. 文件對齊
 
 | 文件 | 狀態 |
 |------|------|
-| `CLAUDE.md` | ✅ 同步：TourMode 鎖寫 / 重置系統範圍 / 借款合約化 / 換匯前後端公式 / 紅旗清單 3 條新增 |
-| `docs/BOARD_GAME_V2_ARCHITECTURE.md` | ✅ 同步：PlayerLoan schema 重寫 / restartGameCycle 細節 / 看板比例 |
-| `docs/BOARD_GAME_V2.md` | ✅ 同步：手動輸入 ID 路徑 / 地獄畫面顯示 ID / 看板比例 56/32/12 |
+| [CLAUDE.md](../CLAUDE.md) | ✅ 完整、最新（每次 schema / spec 改動都同步）|
+| [docs/BOARD_GAME_V2_ARCHITECTURE.md](BOARD_GAME_V2_ARCHITECTURE.md) | ✅ 同步 |
+| [docs/BOARD_GAME_V2.md](BOARD_GAME_V2.md) | ✅ 同步 |
+| [docs/safety_report.md](safety_report.md) | ✅ 完整 |
+| [docs/testspeed.md](testspeed.md) | ✅ 完整含實測對照 |
+| [docs/N+1_report.md](N+1_report.md) | ✅ 完整 |
 
 ---
 
-## 7. 行動清單（按優先順序）
+## 9. 行動清單（按優先排序）
 
 ### P1（必修）
-- 無 ✅
+- ✅ player.ts drawDestiny 補 guards（**已修**）
+- ✅ captain.ts applyQuickAction 補 guards（**已修**）
+- ✅ player.ts exchangeBlessing 錯誤訊息不洩漏福報（**已修**）
 
-### P2（建議近期修）
-- [ ] **3.1** `round_tick` 加 TX_TYPE_LABEL：`'系統推進回合'`
-- [ ] **3.7** 自訂倍率 input `Math.round(v * 100) / 100` 標準化
+### P2（建議近期）
+- [ ] **3.1** db.ts SSL `rejectUnauthorized: true` + Supabase cert
+- [ ] **3.2** auth.ts `assertNotTourMode` 改用 getSetting helper
+- [ ] **3.3** board.ts ScoreWeight 重複 query 合併
+- [ ] **3.4** auth.ts 補 role enum 驗證
+- [ ] **3.5** settings.ts audit log 用 system actor id
+- [ ] **3.6** player.ts transferMoney feeRate NaN 驗證
+- [ ] **3.7** round.ts tickRound 加 assertNotDuringFinalScoring
+- [ ] **3.8** HistoryClient 加 `round_tick` 標籤
+- [ ] **3.9** 抽 `<ConfirmModal>` 取代 12+ 處 window.confirm
+- [ ] **3.10** PlayerHomeClient 按鈕 40px → 44px
 
-### P3（可延後 / 性能優化）
-- [ ] **3.3** 終局結算時 leaderboard 共用 query
-- [ ] **3.4** 合併 `assertNotTourMode` + `assertNotDuringFinalScoring` 成單一 helper
-- [ ] **3.6** `accounts` 編輯頁姓名長度 hint（≤ 4 字）
-
-### P4（風險提醒，無需 code 改動）
-- [ ] **3.5** `DEPLOY.md` 補 migration 0004 升級流程說明
-
----
-
-## 8. 結論
-
-最近 14 個 commit 的工作品質良好，schema 變更與多 action 同步、前後端公式對齊都做到了。修了的 bug（QR race / rebirth schema / exchange mult）都是高品質修復，並同步補進 CLAUDE.md 的紅旗清單防再犯。
-
-**建議部署**：✅ 可以。P2 項目可以安排在下個 minor commit。
+### P3（可延後 / 性能微調）
+- [ ] **4.1-4.6** 6 項小優化
 
 ---
 
-*本 review 由 `/review` skill 執行，無 PR 流程因此改成 review 最近 main 分支 14 個 commit。*
+## 10. 結論
+
+最近 wave 的 14 個 commit + 全 codebase 掃描後，發現的 3 個 critical bug 都已即修。整體 codebase 品質良好，CLAUDE.md 的規範被嚴格遵守（特別是 N+1 預防、auth 紀律、parameterized query）。
+
+**可部署到 production**：✅ 是。
+
+P2 項目可以分次安排在後續 commit。P3 項目大部分是 nice-to-have 或 defense in depth。
+
+---
+
+*本 review 由 4 個並行 `/review` skill 概念執行（Explore agents 分區深度 review）+ 主審驗證 + 整合報告產出。*
