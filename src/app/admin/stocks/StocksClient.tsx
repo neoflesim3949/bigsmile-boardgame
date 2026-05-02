@@ -48,8 +48,9 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
 
   function handleScriptCellSave(round: number, stockId: string, type: ScriptChangeType, value: string) {
     const num = Number(value);
-    if (value === '' || !Number.isFinite(num) || num === 0) {
-      // 空值或 0 → 刪除該 cell
+    // 只有「空值」或「非數字」才刪除 cell。
+    // value=0 是合法的：fixed=0 表示暴跌歸零、percent=0 表示該回合鎖定不變（與無腳本走 ±5% 隨機不同）
+    if (value.trim() === '' || !Number.isFinite(num)) {
       deleteStockScriptCell(round, stockId).then((r) => {
         if (r.ok) {
           setScripts((s) => {
