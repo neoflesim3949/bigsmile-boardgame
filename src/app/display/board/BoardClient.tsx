@@ -60,9 +60,10 @@ export default function BoardClient({ initial, token }: Props) {
   const upClass = data.config.color_scheme === 'red_up' ? 'text-rose-400' : 'text-emerald-400';
   const downClass = data.config.color_scheme === 'red_up' ? 'text-emerald-400' : 'text-rose-400';
 
-  const featured = data.stocks.filter((s) => data.featured_stock_ids.includes(s.id)).slice(0, 4);
+  const featured = data.stocks.filter((s) => data.featured_stock_ids.includes(s.id)).slice(0, 6);
   const visibleAll = data.stocks.filter((s) => s.is_visible);
-  const lb = data.finalLeaderboard ?? [];
+  const lbFinal = data.finalLeaderboard ?? [];
+  const lbLive = data.liveLeaderboard ?? [];
 
   const dt = new Date(now);
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -110,26 +111,34 @@ export default function BoardClient({ initial, token }: Props) {
 
       <main className="flex-1 flex px-8 py-8 gap-6 h-[75vh] pointer-events-none">
         {!isFinal && (
-          <div className="w-[25%] flex flex-col gap-6">
-            <h2 className="text-2xl font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-2 uppercase tracking-widest">
+          <div className="w-[48%] glass-panel rounded-3xl p-6 flex flex-col border border-zinc-800 transition-all duration-500">
+            <h2 className="text-2xl font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-4 uppercase tracking-widest">
               重點趨勢
             </h2>
             {featured.length === 0 ? (
-              <div className="flex-1 glass-panel rounded-3xl p-6 flex items-center justify-center text-zinc-600 border border-zinc-800">
+              <div className="flex-1 flex items-center justify-center text-zinc-600">
                 未設定重點商品
               </div>
             ) : (
-              featured.slice(0, 2).map((s) => (
-                <FeaturedCard key={s.id} stock={s} upClass={upClass} downClass={downClass} colorScheme={data.config.color_scheme} />
-              ))
+              <div className="flex-1 grid grid-cols-3 grid-rows-2 gap-3">
+                {featured.map((s) => (
+                  <FeaturedCard
+                    key={s.id}
+                    stock={s}
+                    upClass={upClass}
+                    downClass={downClass}
+                    colorScheme={data.config.color_scheme}
+                  />
+                ))}
+              </div>
             )}
           </div>
         )}
 
         {!isFinal && (
-          <div className="flex-1 glass-panel rounded-3xl p-8 flex flex-col border border-zinc-800 transition-all duration-500">
-            <h2 className="text-2xl font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-6 uppercase tracking-widest">
-              大會行情總表
+          <div className="flex-1 glass-panel rounded-3xl p-6 flex flex-col border border-zinc-800 transition-all duration-500">
+            <h2 className="text-2xl font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-4 uppercase tracking-widest">
+              行情總表
             </h2>
             <div className="flex-1 overflow-hidden">
               <table className="w-full text-left text-xl">
@@ -174,20 +183,20 @@ export default function BoardClient({ initial, token }: Props) {
           </div>
         )}
 
-        <div className={`${isFinal ? 'w-full' : 'w-[25%]'} glass-panel rounded-3xl p-8 flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
+        <div className={`${isFinal ? 'w-full' : 'w-[20%]'} glass-panel rounded-3xl ${isFinal ? 'p-8' : 'p-4'} flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
           {isFinal && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500"></div>}
-          <h2 className={`font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 mb-6 uppercase tracking-widest flex justify-between items-end ${isFinal ? 'text-4xl py-2' : 'text-xl'}`}>
-            <span className="text-zinc-100">🏆 大富翁風雲榜</span>
+          <h2 className={`font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 ${isFinal ? 'mb-6' : 'mb-4'} uppercase tracking-widest flex justify-between items-end ${isFinal ? 'text-4xl py-2' : 'text-lg'}`}>
+            <span className="text-zinc-100">🏆 風雲榜</span>
             {isFinal && <span className="text-xl font-normal text-zinc-500 normal-case tracking-normal">
               {data.config.final_scoring_triggered_at ? '最終結算成績' : '即時概況'}
             </span>}
           </h2>
           <div className="flex-1 overflow-y-auto no-scrollbar">
-            <table className="w-full text-left text-xl">
+            <table className={`w-full text-left ${isFinal ? 'text-xl' : 'text-base'}`}>
               <thead className="sticky top-0 bg-zinc-900/95 backdrop-blur-sm z-20 shadow-md">
                 <tr className="text-zinc-500 border-b-2 border-zinc-800">
-                  <th className="pb-3 font-normal w-20 text-center">排名</th>
-                  <th className="pb-3 font-normal pl-4">玩家姓名</th>
+                  <th className={`pb-3 font-normal text-center ${isFinal ? 'w-20' : 'w-12'}`}>排名</th>
+                  <th className="pb-3 font-normal pl-3">玩家姓名</th>
                   {isFinal && (
                     <>
                       <SortTh title="金錢" color="amber" />
@@ -201,12 +210,12 @@ export default function BoardClient({ initial, token }: Props) {
                 </tr>
               </thead>
               <tbody className="text-zinc-200">
-                {lb.length === 0 ? (
+                {(isFinal ? lbFinal.length : lbLive.length) === 0 ? (
                   <tr>
                     <td colSpan={isFinal ? 8 : 2} className="py-12 text-center text-zinc-600">尚無玩家資料</td>
                   </tr>
-                ) : (
-                  (isFinal ? lb : lb.slice(0, 10)).map((r, i) => {
+                ) : isFinal ? (
+                  lbFinal.map((r, i) => {
                     const rank = i + 1;
                     return (
                       <tr key={r.user_id} className="border-b border-zinc-800/60">
@@ -226,18 +235,38 @@ export default function BoardClient({ initial, token }: Props) {
                         <td className={`py-4 pl-4 font-bold text-2xl tracking-wide ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
                           {r.name}
                         </td>
-                        {isFinal && (
-                          <>
-                            <td className="py-4 text-right font-bold text-amber-400">{r.money?.toLocaleString() ?? 0}</td>
-                            <td className="py-4 text-right text-teal-400 font-medium">{r.blessing ?? 0}</td>
-                            <td className="py-4 text-right text-rose-400 font-medium">{r.health ?? 0}</td>
-                            <td className="py-4 text-right text-purple-400 font-medium">{r.karma ?? 0}</td>
-                            <td className="py-4 text-right text-zinc-400">{r.rebirth_count ?? 0}</td>
-                            <td className="py-4 pr-4 text-right font-black text-white text-3xl">
-                              {r.final_score?.toLocaleString() ?? 0}
-                            </td>
-                          </>
-                        )}
+                        <td className="py-4 text-right font-bold text-amber-400">{r.money?.toLocaleString() ?? 0}</td>
+                        <td className="py-4 text-right text-teal-400 font-medium">{r.blessing ?? 0}</td>
+                        <td className="py-4 text-right text-rose-400 font-medium">{r.health ?? 0}</td>
+                        <td className="py-4 text-right text-purple-400 font-medium">{r.karma ?? 0}</td>
+                        <td className="py-4 text-right text-zinc-400">{r.rebirth_count ?? 0}</td>
+                        <td className="py-4 pr-4 text-right font-black text-white text-3xl">
+                          {r.final_score?.toLocaleString() ?? 0}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  lbLive.map((r, i) => {
+                    const rank = i + 1;
+                    return (
+                      <tr key={r.user_id} className="border-b border-zinc-800/60">
+                        <td className="py-3 text-center w-16">
+                          {rank <= 3 ? (
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-black text-base shadow-lg ${
+                              rank === 1 ? 'bg-yellow-400 text-yellow-900 shadow-yellow-400/20'
+                                : rank === 2 ? 'bg-zinc-300 text-zinc-800'
+                                : 'bg-amber-600 text-amber-100'
+                            }`}>
+                              {rank}
+                            </span>
+                          ) : (
+                            <span className="font-bold text-zinc-500 text-xl">{rank}</span>
+                          )}
+                        </td>
+                        <td className={`py-3 pl-3 font-bold text-lg tracking-wide truncate ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
+                          {r.name}
+                        </td>
                       </tr>
                     );
                   })
@@ -335,20 +364,20 @@ function FeaturedCard({
       : (colorScheme === 'red_up' ? 'from-emerald-500/5' : 'from-rose-500/5');
 
   return (
-    <div className="flex-1 glass-panel rounded-3xl p-6 relative overflow-hidden border border-zinc-800">
+    <div className="bg-zinc-900/60 rounded-2xl p-3 relative overflow-hidden border border-zinc-800 min-h-0">
       <div className={`absolute inset-0 bg-gradient-to-br ${gradientFrom} to-transparent`}></div>
-      <div className="relative z-10 flex justify-between items-start mb-4">
-        <div>
-          <h3 className="text-2xl font-bold text-zinc-100">
-            <span className="font-mono text-amber-300 text-sm mr-2">{stock.code}</span>
+      <div className="relative z-10 flex justify-between items-start mb-1.5 gap-2">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-bold text-zinc-100 truncate">
+            <span className="font-mono text-amber-300 text-xs mr-1">{stock.code}</span>
             {stock.name}
           </h3>
-          <p className={`${cls} font-bold text-lg flex items-center gap-1 mt-1`}>
-            {Arrow ? <Arrow className="w-5 h-5" /> : <span className="w-5 h-5 inline-block" />}
-            {pct >= 0 ? '+ ' : ''}{pct.toFixed(1)}%
+          <p className={`${cls} font-bold text-sm flex items-center gap-1 mt-0.5`}>
+            {Arrow ? <Arrow className="w-4 h-4" /> : <span className="w-4 h-4 inline-block" />}
+            {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
           </p>
         </div>
-        <p className="text-4xl font-black text-amber-500">{stock.current_price.toLocaleString()}</p>
+        <p className="text-2xl font-black text-amber-500 shrink-0">{stock.current_price.toLocaleString()}</p>
       </div>
       <Sparkline points={stock.history} color={lineColorHex} />
     </div>
@@ -412,5 +441,5 @@ function Sparkline({ points, color }: { points: BoardData['stocks'][number]['his
     ctx.stroke();
   }, [points, color]);
 
-  return <canvas ref={ref} className="w-full h-32 absolute bottom-0 left-0 right-0 opacity-80" />;
+  return <canvas ref={ref} className="w-full h-16 absolute bottom-0 left-0 right-0 opacity-80" />;
 }

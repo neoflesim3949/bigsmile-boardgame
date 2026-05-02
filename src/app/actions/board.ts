@@ -30,6 +30,12 @@ export interface BoardData {
     text: string;
     priority: number;
   }>;
+  /** 常規模式：每回合 tick 後更新；只給前 10 名 rank + name（保持神祕感） */
+  liveLeaderboard: Array<{
+    user_id: string;
+    name: string;
+  }>;
+  /** 終局結算後展開（含全部欄位） */
   finalLeaderboard?: Array<{
     user_id: string;
     name: string;
@@ -113,6 +119,36 @@ export async function getBoardData(token: string): Promise<ActionResult<BoardDat
        LIMIT 30`,
     );
 
+    // 常規即時排行榜（每次 tickRound 後 BoardConfig 變動 → 看板會 fallback poll 拿到新值）
+    // 排序規則跟 admin dashboard 相同：money×Wm + blessing×Wb − karma×Wk（JS 端算）
+    const liveSettings = await query<{ key: string; value: string }>(
+      `SELECT key, value FROM "AppSettings"
+       WHERE key IN ('ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma')`,
+    );
+    const liveSm = new Map(liveSettings.rows.map((r) => [r.key, r.value] as const));
+    const liveWm = Number(liveSm.get('ScoreWeightMoney') ?? '0.05') || 0;
+    const liveWb = Number(liveSm.get('ScoreWeightBlessing') ?? '200') || 0;
+    const liveWk = Number(liveSm.get('ScoreWeightKarma') ?? '150') || 0;
+    const liveRaw = await query<{
+      user_id: string; name: string;
+      money: number; blessing: number; karma: number;
+    }>(
+      `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.karma
+       FROM "Account" a
+       JOIN "PlayerStats" ps ON ps.user_id = a.user_id
+       WHERE a.role = 'player' AND a.is_active = true
+       LIMIT 500`,
+    );
+    const liveLeaderboard = liveRaw.rows
+      .map((r) => ({
+        user_id: r.user_id,
+        name: r.name,
+        score: r.money * liveWm + r.blessing * liveWb - r.karma * liveWk,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+      .map(({ user_id, name }) => ({ user_id, name }));
+
     let finalLeaderboard: BoardData['finalLeaderboard'];
     if (cfg.final_scoring_triggered_at) {
       const settings = await query<{ key: string; value: string }>(
@@ -149,6 +185,7 @@ export async function getBoardData(token: string): Promise<ActionResult<BoardDat
       stocks: stocks.rows,
       featured_stock_ids: cfg.featured_stock_ids,
       events: events.rows,
+      liveLeaderboard,
       finalLeaderboard,
     });
   } catch (err) {
