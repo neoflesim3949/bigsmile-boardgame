@@ -683,7 +683,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `EventStartAt` | TIMESTAMPTZ 字串 NULL | 活動預定開始時間（NULL = 不限，依 `BoardGameEnabled`） |
 | `EventEndAt` | TIMESTAMPTZ 字串 NULL | 活動預定結束時間（NULL = 不限，依 `BoardGameEnabled`） |
 | `ExchangeRate` | 數字字串 | 1 福報 = N 金錢（基準匯率，僅作參考；實際匯兌走 `ExchangeOption` 個別方案） |
-| `ExchangeRateMultiplier` | 數字字串（預設 `'1.0'`） | 全域換匯倍率，套在 `ExchangeOption.money_gain_per_unit` 上：實得金錢 = `units × money_gain_per_unit × multiplier`。`/admin` 總覽面板的「換匯所即時權重控制」即時調整此值（-50% = 0.5、+50% = 1.5、+100% = 2.0…）。範圍 0–10 |
+| `ExchangeRateMultiplier` | 數字字串（預設 `'1.0'`） | 全域換匯倍率。**前後端統一公式**：`effective_per_unit = ROUND(money_gain_per_unit × multiplier)`、`total = effective_per_unit × units`（**先 round 再乘 units**，不是 `ROUND(per_unit × units × mult)`，否則前端顯示與後端入帳會差 1 元）。`listExchangeOptionsForPlayer`（前台列表）與 `exchangeBlessing`（後台結算）兩處都要套，缺一會誤導。`/admin` 總覽面板的「換匯所即時權重控制」即時調整此值（-50% = 0.5、+50% = 1.5、+100% = 2.0…），「自訂」按鈕走內建 modal（不用 `window.prompt`）。範圍 0–10 |
 | `TransferFeeRate` | 數字字串 | 玩家互轉手續費比率（預設 `'0'`） |
 | `ScoreWeightMoney` | 數字字串 | 最終計分：金錢權重（建議 `'0.05'`） |
 | `ScoreWeightBlessing` | 數字字串 | 最終計分：福分權重（建議 `'200'`） |

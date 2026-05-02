@@ -176,7 +176,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 **B. 3 控制台**
 - **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（兩 tx + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）
 - **即時跑馬燈廣播**：textarea + 發送 / 清除 → `publishMarquee` / `clearMarquee`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
-- **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上
+- **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上。**「自訂」用內建 modal**（不要用 `window.prompt` — mobile Safari / 部分桌面 Chrome 會靜默擋）。**前後端必須同時套用倍率且公式一致**：`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用 `effective_per_unit = round(money_gain_per_unit × mult)`、`total = effective_per_unit × units`（先 round 再乘，避免「顯示 +200、實際 +199」的 rounding 爭議）。**禁止**只在後端套倍率不在前端 list 套，否則玩家看到的「將獲得」與實際入帳會不一致
 
 **C. 排行榜（前 50 名）**
 即時依 `ScoreWeight*` 計算 `final_score = money×W_m + blessing×W_b − karma×W_k`。**計算在 JS 端做**（避免 PG 對 `int * float-text-param` 的 cast 推導失敗）。
@@ -352,6 +352,9 @@ app/
 ### 設定
 - [ ] 直接 `.from('AppSettings').select()` 而非走 `getSetting` helper
 - [ ] 新增 setting key 沒在 `lib/settings.ts` 同步登錄
+- [ ] 換匯倍率 `ExchangeRateMultiplier` **只在後端結算 `exchangeBlessing` 套、沒在前台列表 `listExchangeOptionsForPlayer` 套**（玩家會看到舊 rate，輸入後實際入帳跟顯示不一致）；或前後端套用公式不一致（必須都用 `ROUND(per_unit × mult) × units`，不是 `ROUND(per_unit × units × mult)`）
+- [ ] 換匯 / 銀行 / 借款的「自訂」彈窗用 `window.prompt`（mobile Safari / 部分桌面 Chrome 會靜默擋）— 改用內建 modal
+- [ ] schema 改了（如 migration 新增 / 移除 / 重新命名欄位）但其他 server action 還在 SELECT 舊欄位（會丟 PG「column does not exist」被 fail() 包成「伺服器發生錯誤」）。改 schema 後必須 grep 該欄位名確認所有用法都對齊新 schema
 
 ### UI
 - [ ] 寫死 px 沒考慮手機版

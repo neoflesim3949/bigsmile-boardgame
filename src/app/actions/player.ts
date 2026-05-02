@@ -423,6 +423,9 @@ export interface ExchangeOptionViewPlayer {
 export async function listExchangeOptionsForPlayer(): Promise<ActionResult<ExchangeOptionViewPlayer[]>> {
   try {
     const session = await requireRole('player');
+    // 取 admin 在 dashboard 設的即時匯率倍率
+    const multStr = await getSetting('ExchangeRateMultiplier');
+    const mult = Number(multStr) || 1.0;
     const r = await query<{
       id: string; label: string;
       blessing_cost_per_unit: number; money_gain_per_unit: number;
@@ -438,12 +441,14 @@ export async function listExchangeOptionsForPlayer(): Promise<ActionResult<Excha
     );
     const out = r.rows.map((row) => {
       const max_units = Math.max(0, Math.floor(row.blessing / row.blessing_cost_per_unit));
+      // 套用即時倍率，前端顯示 = effective rate（後端 exchangeBlessing 也用同一倍率算實際入帳）
+      const effective_per_unit = Math.round(row.money_gain_per_unit * mult);
       return {
         id: row.id,
         label: row.label,
-        money_gain_per_unit: row.money_gain_per_unit,
+        money_gain_per_unit: effective_per_unit,
         max_units,
-        max_money: max_units * row.money_gain_per_unit,
+        max_money: max_units * effective_per_unit,
       };
     });
     return ok(out);
@@ -481,11 +486,14 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
       assertPlayerAlive(me);
 
       // 套用 dashboard 即時權重倍率（admin 在 /admin 上調整 ExchangeRateMultiplier）
+      // 算法跟 listExchangeOptionsForPlayer 一致：先 round 出 effective per_unit，
+      // 再乘 units（避免「顯示 +200、實際 +199」的 rounding 爭議）
       const multStr = await getSetting('ExchangeRateMultiplier');
       const mult = Number(multStr) || 1.0;
+      const effectivePerUnit = Math.round(opt.rows[0].money_gain_per_unit * mult);
 
       const totalCost = opt.rows[0].blessing_cost_per_unit * data.units;
-      const totalGain = Math.round(opt.rows[0].money_gain_per_unit * data.units * mult);
+      const totalGain = effectivePerUnit * data.units;
       if (me.blessing < totalCost) throw new ActionError('INSUFFICIENT_FUNDS', '福報不足');
 
       const upd = await client.query<{ money: number; blessing: number }>(
