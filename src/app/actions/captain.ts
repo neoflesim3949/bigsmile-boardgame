@@ -7,6 +7,7 @@ import { query, withTx } from '@/lib/db';
 import {
   assertCaptainOfStation,
   assertNotDuringFinalScoring,
+  assertNotTourMode,
   assertPlayerAlive,
   assertPlayerDead,
   requireRole,
@@ -532,6 +533,7 @@ export async function rebirthPlayer(p: z.infer<typeof rebirthSchema>): Promise<A
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
 
       // 關卡 + 重生鍵權限
       const stCheck = await assertCaptainOfStation(client, session.userId, data.stationId);

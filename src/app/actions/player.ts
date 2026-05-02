@@ -6,6 +6,7 @@ import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { query, withTx } from '@/lib/db';
 import {
   assertNotDuringFinalScoring,
+  assertNotTourMode,
   assertPlayerAlive,
   requireRole,
 } from '@/lib/auth';
@@ -204,6 +205,8 @@ export interface PlayerStatsView {
   bank_loan: number;
   show_all_stats: boolean;
   is_dead: boolean;
+  /** 導覽模式：true 時前端不顯示地獄畫面、不導 onboarding，所有寫入後端會擋 */
+  tour_mode: boolean;
   game_enabled: boolean;
   final_scoring_at: string | null;
   refresh_cooldown_seconds: number;
@@ -244,7 +247,7 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
       }
     }
 
-    const settings = await getSettings(['ShowAllStats', 'BoardGameEnabled']);
+    const settings = await getSettings(['ShowAllStats', 'BoardGameEnabled', 'TourMode']);
     const board = await query<{ final_scoring_triggered_at: string | null }>(
       `SELECT final_scoring_triggered_at FROM "BoardConfig" WHERE id = 1`,
     );
@@ -289,6 +292,7 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
         bank_loan: stats.bank_loan,
         show_all_stats: settings.ShowAllStats === 'true',
         is_dead: stats.health <= 0 || stats.blessing <= 0,
+        tour_mode: settings.TourMode === 'true',
         game_enabled: settings.BoardGameEnabled === 'true',
         final_scoring_at: board.rows[0]?.final_scoring_triggered_at ?? null,
         refresh_cooldown_seconds: cooldown,
@@ -318,6 +322,7 @@ export async function transferMoney(payload: z.infer<typeof transferSchema>): Pr
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
 
       // 對方必須是 active player
       const target = await client.query<{ name: string }>(
@@ -459,6 +464,7 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
       const opt = await client.query<{ blessing_cost_per_unit: number; money_gain_per_unit: number }>(
         `SELECT blessing_cost_per_unit, money_gain_per_unit
          FROM "ExchangeOption" WHERE id = $1 AND is_active = true`,
@@ -576,6 +582,7 @@ export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Pro
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
       const opt = await client.query<{
         blessing_collateral_per_unit: number;
         money_per_unit: number;
@@ -650,6 +657,7 @@ export async function repayBank(payload: z.infer<typeof repaySchema>): Promise<A
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
       const stats = await client.query<{ money: number; health: number; blessing: number; bank_loan: number }>(
         `SELECT money, health, blessing, bank_loan FROM "PlayerStats" WHERE user_id = $1 FOR UPDATE`,
         [session.userId],

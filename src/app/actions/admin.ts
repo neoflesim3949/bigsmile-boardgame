@@ -144,7 +144,7 @@ export async function performDangerOp(op: DangerOp): Promise<ActionResult<{ op: 
     await withTx(async (client) => {
       switch (op) {
         case 'reset_player_data': {
-          // 清空玩家數值、命格、持股、借貸、道具，但保留 Account
+          // 清空玩家數值、命格、持股、借貸、道具、四項值明細（Transaction），保留 Account 與商品定義
           await client.query(
             `UPDATE "PlayerStats"
              SET destiny_name = NULL, money = 0, health = 0, blessing = 0, karma = 0,
@@ -154,6 +154,11 @@ export async function performDangerOp(op: DangerOp): Promise<ActionResult<{ op: 
           await client.query(`DELETE FROM "StockHolding"`);
           await client.query(`DELETE FROM "PlayerLoan"`);
           await client.query(`DELETE FROM "PlayerItem"`);
+          // 玩家四項值歷史明細（quick_action / stock_buy/sell / transfer / exchange / bank_*）
+          await client.query(
+            `DELETE FROM "Transaction"
+             WHERE user_id IN (SELECT user_id FROM "Account" WHERE role = 'player')`,
+          );
           break;
         }
         case 'delete_all_players': {
@@ -1412,10 +1417,8 @@ export async function restartGameCycle(): Promise<ActionResult<{ reset_at: strin
       await client.query(`DELETE FROM "StockHolding"`);
       await client.query(`DELETE FROM "PlayerLoan"`);
       await client.query(`DELETE FROM "PlayerItem"`);
-      // 3. 股票歷史 + 回合腳本
+      // 3. 股票歷史曲線（StockRoundScript / StockRoundEvent **保留** — admin 預先設定的回合腳本不該被刪）
       await client.query(`DELETE FROM "StockHistory"`);
-      await client.query(`DELETE FROM "StockRoundScript"`);
-      await client.query(`DELETE FROM "StockRoundEvent"`);
       // 4. 使用次數 / 計數歸零
       await client.query(`UPDATE "Station" SET global_use_count = 0`);
       await client.query(`UPDATE "QuickAction" SET global_use_count = 0`);
@@ -1423,6 +1426,12 @@ export async function restartGameCycle(): Promise<ActionResult<{ reset_at: strin
       await client.query(`DELETE FROM "QuickActionUsage"`);
       // 5. 事件回到「未啟用」起始
       await client.query(`UPDATE "Event" SET is_active = false`);
+      // 6. 玩家四項值歷史明細（含 quick_action / stock_buy / stock_sell / transfer / exchange / bank_*）
+      //    保留 admin 操作日誌（actor='admin' 且 tx_type IN ('settings_update','danger_zone_reset','final_scoring')）
+      await client.query(
+        `DELETE FROM "Transaction"
+         WHERE user_id IN (SELECT user_id FROM "Account" WHERE role = 'player')`,
+      );
       // 6. BoardConfig 場次狀態
       const upd = await client.query<{ updated_at: string }>(
         `UPDATE "BoardConfig"

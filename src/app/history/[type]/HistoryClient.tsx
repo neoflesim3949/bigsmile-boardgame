@@ -92,7 +92,7 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
     case 'exchange': {
       const units = n(payload.units);
       const moneyGained = n(payload.money_gained);
-      if (units != null && moneyGained != null) return `兌換 ${units} 單位福報 → +$${moneyGained.toLocaleString()}`;
+      if (units != null && moneyGained != null) return `兌換 ${units} 單位 → +$${moneyGained.toLocaleString()}`;
       return null;
     }
     case 'bank_borrow': {

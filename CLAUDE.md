@@ -152,7 +152,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 | 預設新手初始值 | `InitialMoney`、`InitialHealth`、`InitialBlessing`、`InitialKarma`（命格範本不可用時的 fallback） |
 | 重生後初始值 | `RebirthMoney`、`RebirthHealth`（最高 100）、`RebirthBlessing`、`RebirthKarma`（與新玩家初始值**分開管理**） |
 | 新手命格範本池 | `InitialValueTemplate` 表 CRUD（多個範本，啟用中隨機抽取） |
-| 危險操作區（Danger Zone） | 5 個按鈕（重置會員明細 / 刪除所有會員 / 重置股價歷史 / 刪除所有股票 / 重置使用次數），**每個按鈕需經過 3 次確認彈窗才會執行** |
+| 危險操作區（Danger Zone） | 5 個按鈕（重置會員明細 / 刪除所有會員 / 重置股價歷史 / 刪除所有股票 / 重置使用次數），**每個按鈕需經過 3 次確認彈窗才會執行**。**「重置會員明細」**：清空玩家四項數值 / 命格 / 持股 / 借貸 / 道具 + **玩家四項值的 Transaction 明細**（`DELETE WHERE user_id IN (player accounts)`），保留 Account |
 
 **這頁不含**：
 - **活動時間 / 遊戲狀態旗標**（`BoardGameEnabled` / `CardDrawMode` / `TourMode`）→ 在 `/admin` 總覽面板的工具列
@@ -167,10 +167,10 @@ assertPlayerAlive(stats)   // ← 統一 guard
 `/admin` 是管理員的核心儀表板，**唯一**控制遊戲整體節奏的地方。三大功能群：
 
 **A. 頂部工具列（5 鈕）**
-- 「導覽遊戲」toggle → `setQuickFlag('TourMode', bool)`
+- 「導覽遊戲」toggle → `setQuickFlag('TourMode', bool)`。**TourMode=true 時**：(1) 玩家不需抽命格也能瀏覽所有頁面（middleware 跳過導向 `/onboarding`）；(2) 即使 health/blessing ≤ 0 不顯示地獄畫面；(3) **所有玩家 / 關主寫入 action 後端用 `assertNotTourMode()` 一律拒絕**（換匯 / 轉帳 / 股市 / 借貸 / 套用快捷模組 / 重生）；玩家頁面顯示 sky 色 banner 提示「導覽中」
 - 「抽卡模式」toggle → `setQuickFlag('CardDrawMode', bool)`
 - 「遊戲開始」按鈕 → `setQuickFlag('BoardGameEnabled', true)`；**前置條件**：上面兩個 toggle 都要先開
-- 「遊戲結束(計分)」按鈕 → `triggerFinalScoring()`（鎖定玩家寫入、看板切排行榜）。**已計分後此按鈕變成「重啟新一場」** → `restartGameCycle()`：核重置（清玩家狀態 / 持股 / 借貸 / 道具 / 股票歷史 / 回合腳本 / 使用次數 / 看板場次狀態，並把事件全部停用、旗標歸零；保留帳號與商品 / 道具 / 關卡 / 方案定義），**前端強制 5 次確認彈窗**
+- 「遊戲結束(計分)」按鈕 → `triggerFinalScoring()`（鎖定玩家寫入、看板切排行榜）。**已計分後此按鈕變成「重置系統」** → `restartGameCycle()`：核重置（清玩家狀態 / 持股 / 借貸 / 道具 / 股票歷史曲線 / 使用次數 / 看板場次狀態 / **玩家四項值 Transaction 明細**，並把事件全部停用、所有旗標歸零；**保留**帳號、商品定義含 current_price、道具、關卡、方案、命格範本、**StockRoundScript / StockRoundEvent 股票回合腳本**），**前端強制 5 次確認彈窗**。重置後三鍵全關，admin 必須重新按「導覽遊戲」「抽卡模式」「遊戲開始」才能啟動下一場
 - 「開啟活動看板」link → `/admin/events`（去發 display token）
 
 **B. 3 控制台**

@@ -50,7 +50,8 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   }
 
   // ─── 地獄畫面 ────────────────────────────────────────────────
-  if (stats.is_dead) {
+  // 導覽模式下不顯示地獄畫面（即使 is_dead；admin 可在示範時切到 dead 看四項值畫面）
+  if (stats.is_dead && !stats.tour_mode) {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
         <Skull className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
@@ -101,7 +102,12 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
         </div>
       </header>
 
-      {!stats.game_enabled && (
+      {stats.tour_mode && (
+        <div className="bg-sky-950/40 border border-sky-700/60 text-sky-300 rounded-xl p-3 mb-4 text-sm text-center">
+          🧭 導覽模式中 — 你可以瀏覽所有頁面，但所有寫入動作（換匯 / 轉帳 / 股市 / 借貸）都會被擋
+        </div>
+      )}
+      {!stats.game_enabled && !stats.tour_mode && (
         <div className="bg-amber-950/30 border border-amber-900/60 text-amber-300 rounded-xl p-3 mb-4 text-sm text-center">
           活動尚未開始，所有寫入操作停用
         </div>

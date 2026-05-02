@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { query, withTx } from '@/lib/db';
-import { assertNotDuringFinalScoring, assertPlayerAlive, requireRole } from '@/lib/auth';
+import { assertNotDuringFinalScoring, assertNotTourMode, assertPlayerAlive, requireRole } from '@/lib/auth';
 
 export interface StockMarketRow {
   id: string;
@@ -122,6 +122,7 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
 
       // 不鎖 Stock row（CLAUDE.md §3.2 / §11）— 股價以呼叫當下價成交
       const stock = await client.query<{ current_price: number; code: string; name: string }>(
@@ -201,6 +202,7 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
 
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
 
       const stock = await client.query<{ current_price: number; is_sellable: boolean; code: string; name: string }>(
         `SELECT current_price, is_sellable, code, name FROM "Stock" WHERE id = $1`,

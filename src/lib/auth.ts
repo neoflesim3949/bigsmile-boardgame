@@ -160,6 +160,20 @@ export async function assertNotDuringFinalScoring(client?: PoolClient): Promise<
   }
 }
 
+/**
+ * 導覽模式（TourMode）寫入禁止 — 凡會改變玩家四項值 / 持股 / 借貸 / 道具 的 action 都應呼叫。
+ * 用途：admin 在大會前帶觀眾走流程示範時開啟，前端可正常瀏覽，但所有寫入靜默拒絕。
+ */
+export async function assertNotTourMode(client?: PoolClient): Promise<void> {
+  const sql = `SELECT value FROM "AppSettings" WHERE key = 'TourMode'`;
+  const r = client
+    ? await client.query<{ value: string }>(sql)
+    : await query<{ value: string }>(sql);
+  if (r.rows[0]?.value === 'true') {
+    throw new ActionError('FORBIDDEN', '導覽模式中，所有玩家寫入動作已停用');
+  }
+}
+
 export async function withSessionTx<T>(
   fn: (client: PoolClient, session: SessionPayload) => Promise<T>,
 ): Promise<T> {

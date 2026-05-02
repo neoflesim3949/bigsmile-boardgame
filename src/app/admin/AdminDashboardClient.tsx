@@ -91,7 +91,7 @@ export default function AdminDashboardClient({ initial }: Props) {
     const r = await restartGameCycle();
     if (r.ok) {
       await reload();
-      showToast(true, '已重啟新一場（請重新按「遊戲開始」）');
+      showToast(true, '系統已重置，請依序按「導覽遊戲」「抽卡模式」再按「遊戲開始」');
     } else {
       showToast(false, r.error?.message ?? '重啟失敗');
       throw new Error(r.error?.message ?? 'failed');
@@ -224,9 +224,9 @@ export default function AdminDashboardClient({ initial }: Props) {
               onClick={() => setRestartModalOpen(true)}
               disabled={busy}
               className="bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-700 hover:border-rose-500 px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 min-h-[40px]"
-              title="重啟新一場（會清空所有玩家狀態）"
+              title="重置系統（會清空所有玩家狀態與明細）"
             >
-              <RefreshCw className="w-4 h-4" /> 重啟新一場
+              <RefreshCw className="w-4 h-4" /> 重置系統
             </button>
           ) : (
             <button
@@ -469,11 +469,11 @@ export default function AdminDashboardClient({ initial }: Props) {
 }
 
 const RESTART_STEPS = [
-  '你即將重啟新一場 — 確定要繼續嗎？',
-  '此操作會清空所有玩家狀態與遊戲進度，無法復原。',
-  '清空項目：玩家四項數值、命格、持股、借貸、道具、股票歷史、回合腳本、使用次數。',
-  '帳號、商品定義、道具定義、關卡、財務方案、命格範本將被保留。',
-  '最後確認 — 真的要核重置這場？沒有後悔藥。',
+  '你即將重置系統 — 確定要繼續嗎？',
+  '此操作會清空所有玩家狀態、四項值明細與遊戲進度，無法復原。',
+  '清空項目：玩家四項數值、命格、持股、借貸、道具、股票歷史曲線、使用次數、玩家交易明細（金錢/福分/業力歷史）。',
+  '保留項目：帳號、商品定義、道具、關卡、財務方案、命格範本、**股票回合腳本與事件文字**（這些是預先設好的活動內容）。',
+  '重置後：旗標全關，需重新按「導覽遊戲」「抽卡模式」「遊戲開始」三鍵才會啟動。最後確認？',
 ];
 
 function RestartConfirmModal({
@@ -512,7 +512,7 @@ function RestartConfirmModal({
         {done ? (
           <div className="text-center py-4">
             <div className="text-3xl mb-3">✅</div>
-            <p className="text-emerald-400 font-bold text-lg">已重啟新一場</p>
+            <p className="text-emerald-400 font-bold text-lg">系統已重置</p>
             <p className="text-zinc-500 text-sm mt-2">請重新按「遊戲開始」啟動</p>
           </div>
         ) : (
@@ -520,7 +520,7 @@ function RestartConfirmModal({
             <div className="flex items-center gap-3 mb-4">
               <AlertTriangle className="w-7 h-7 text-rose-500 shrink-0" />
               <div>
-                <h4 className="font-bold text-rose-400 text-base">重啟新一場（核重置）</h4>
+                <h4 className="font-bold text-rose-400 text-base">重置系統（核重置）</h4>
                 <p className="text-xs text-zinc-500 mt-0.5">需經 5 次確認才會執行</p>
               </div>
             </div>
@@ -560,7 +560,7 @@ function RestartConfirmModal({
                   ? '執行中…'
                   : step < RESTART_STEPS.length - 1
                     ? `確認 ${step + 1}/5`
-                    : '🔥 最終確認，核重置'}
+                    : '🔥 最終確認，重置系統'}
               </button>
             </div>
           </>

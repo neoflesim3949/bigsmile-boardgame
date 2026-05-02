@@ -9,7 +9,9 @@ export default async function PlayerPage() {
   const session = await requireRole('player');
 
   const cardDrawMode = await getSetting('CardDrawMode');
-  if (cardDrawMode === 'true') {
+  const tourMode = await getSetting('TourMode');
+  // 導覽模式 = 沒抽命格也能瀏覽，跳過強制導向 /onboarding
+  if (cardDrawMode === 'true' && tourMode !== 'true') {
     const r = await query<{ destiny_name: string | null }>(
       `SELECT destiny_name FROM "PlayerStats" WHERE user_id = $1`,
       [session.userId],
