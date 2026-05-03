@@ -12,6 +12,7 @@ import {
   lookupPlayerByManualId,
   applyQuickAction,
   rebirthPlayer,
+  captainVerifyPlayerQr,
   type CaptainStation,
   type QuickActionRow,
   type ScannedPlayer,
@@ -132,11 +133,55 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
     setInProgress((arr) => arr.filter((x) => x.key !== key));
   }
 
-  // 完成結算前的確認 modal — 玩家錯誤領獎會直接扣分發道具，需二次確認
+  // 結算流程：兩步驗證
+  //   1. handleSettle → 開 verify modal（再掃 QR / 輸入 ID 確認玩家在場）
+  //   2. verify pass → 開 confirm modal（預覽變動 + 最終確認）
+  //   3. confirm → performSettle（呼叫 applyQuickAction）
+  const [verifySettle, setVerifySettle] = useState<InProgressItem | null>(null);
   const [confirmSettle, setConfirmSettle] = useState<InProgressItem | null>(null);
+  const [verifyManualId, setVerifyManualId] = useState('');
+  const [verifyScanOpen, setVerifyScanOpen] = useState(false);
+  const [verifyErr, setVerifyErr] = useState<string | null>(null);
 
   function handleSettle(item: InProgressItem) {
-    setConfirmSettle(item);
+    setVerifyManualId('');
+    setVerifyErr(null);
+    setVerifySettle(item);
+  }
+
+  function handleVerifyManualId() {
+    if (!verifySettle) return;
+    setVerifyErr(null);
+    if (verifyManualId.trim().length < 6) {
+      setVerifyErr('請輸入完整 ID（≥ 6 碼）');
+      return;
+    }
+    if (verifyManualId.trim() !== verifySettle.player.user_id) {
+      setVerifyErr(`ID 不符（這筆是 ${verifySettle.player.name}）`);
+      return;
+    }
+    // 通過 → 進確認 modal
+    setVerifySettle(null);
+    setConfirmSettle(verifySettle);
+  }
+
+  function handleVerifyQrScanned(token: string) {
+    setVerifyScanOpen(false);
+    if (!verifySettle) return;
+    busyTransition(async () => {
+      const r = await captainVerifyPlayerQr(token);
+      if (!r.ok) {
+        setVerifyErr(r.error?.message ?? 'QR 解碼失敗');
+        return;
+      }
+      if (r.data!.user_id !== verifySettle.player.user_id) {
+        setVerifyErr(`掃到不同玩家（${r.data!.name}）。這筆是 ${verifySettle.player.name}`);
+        return;
+      }
+      // 通過 → 進確認 modal
+      setVerifySettle(null);
+      setConfirmSettle(verifySettle);
+    });
   }
 
   function performSettle(item: InProgressItem) {
@@ -412,6 +457,92 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
           {toast.ok ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
           <span>{toast.msg}</span>
         </div>
+      )}
+
+      {/* Verify modal — 完成結算前再驗證玩家身份 */}
+      {verifySettle && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4"
+          onClick={() => setVerifySettle(null)}
+        >
+          <div
+            className="bg-zinc-900 border border-amber-500/40 rounded-2xl p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <QrCode className="w-6 h-6 text-amber-400 shrink-0" />
+              <div>
+                <h4 className="font-bold text-zinc-100 text-base">確認玩家身份</h4>
+                <p className="text-xs text-zinc-500 mt-0.5">完成結算前再驗證一次玩家還在現場</p>
+              </div>
+            </div>
+            <div className="bg-zinc-950 border border-zinc-700 rounded-lg p-3 mb-4">
+              <p className="text-xs text-zinc-500">這筆要結算給：</p>
+              <p className="text-amber-400 font-bold text-base">{verifySettle.player.name}</p>
+              <p className="text-zinc-500 font-mono text-xs">{verifySettle.player.user_id}</p>
+              <p className="text-zinc-300 text-sm mt-1">
+                模組：<span className="text-zinc-100 font-bold">{verifySettle.quickAction.label}</span>
+              </p>
+            </div>
+
+            <button
+              onClick={() => setVerifyScanOpen(true)}
+              disabled={busy}
+              className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-zinc-950 py-3 rounded-lg font-bold text-sm min-h-[44px] flex items-center justify-center gap-2 mb-3"
+            >
+              <QrCode className="w-4 h-4" /> 掃描玩家 QR
+            </button>
+
+            <div className="relative my-3 flex items-center">
+              <div className="flex-1 border-t border-zinc-800"></div>
+              <span className="px-3 text-xs text-zinc-500">或</span>
+              <div className="flex-1 border-t border-zinc-800"></div>
+            </div>
+
+            <div className="flex gap-2 mb-2">
+              <input
+                value={verifyManualId}
+                onChange={(e) => setVerifyManualId(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleVerifyManualId(); }}
+                disabled={busy}
+                placeholder="輸入玩家 ID（≥ 6 碼）"
+                className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm font-mono"
+              />
+              <button
+                onClick={handleVerifyManualId}
+                disabled={busy || verifyManualId.trim().length < 6}
+                className="bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-100 px-3 rounded-lg text-sm font-bold min-h-[44px]"
+              >
+                確認
+              </button>
+            </div>
+
+            {verifyErr && (
+              <div className="bg-rose-950/40 border border-rose-700 text-rose-300 rounded-lg p-2 text-xs flex items-start gap-2 mb-3">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span>{verifyErr}</span>
+              </div>
+            )}
+
+            <button
+              onClick={() => setVerifySettle(null)}
+              disabled={busy}
+              className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg text-sm font-bold border border-zinc-700 disabled:opacity-50 min-h-[44px]"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Verify QR scanner（嵌套在 verify modal 流程內） */}
+      {verifyScanOpen && (
+        <QrScannerModal
+          title="掃描玩家 QR 確認身份"
+          hint="把要結算的玩家 QR 對準框內"
+          onClose={() => setVerifyScanOpen(false)}
+          onScanned={handleVerifyQrScanned}
+        />
       )}
 
       {confirmSettle && (

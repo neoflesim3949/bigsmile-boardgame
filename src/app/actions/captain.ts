@@ -311,6 +311,26 @@ export async function lookupPlayerByQR(
 }
 
 /**
+ * 完成結算前的「再驗證」— 只解 QR token 拿 user_id，不重新 lookup 整個 PlayerLookupResult。
+ * 用途：關主按「完成結算」前要再掃一次玩家 QR / 輸入 ID 確認玩家還在現場。
+ */
+export async function captainVerifyPlayerQr(token: string): Promise<ActionResult<{ user_id: string; name: string }>> {
+  try {
+    await requireRole('captain');
+    const decoded = verifyQrToken(token, 'player');
+    if (!decoded) throw new ActionError('INVALID_INPUT', 'QR Code 無效或已過期');
+    const r = await query<{ user_id: string; name: string }>(
+      `SELECT user_id, name FROM "Account" WHERE user_id = $1 AND role = 'player' AND is_active = true`,
+      [decoded.sub],
+    );
+    if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '玩家不存在或已停用');
+    return ok(r.rows[0]);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
  * 手動輸入 ID 查找玩家（QR 掃碼失敗時的後備路徑）。
  * **限制**：不能用於重生 — 重生強制走 QR 掃碼路徑（CLAUDE.md §4 / spec）。
  * 規則跟 player.ts 的 lookupPlayerById 一樣：≥ 6 碼才查。
