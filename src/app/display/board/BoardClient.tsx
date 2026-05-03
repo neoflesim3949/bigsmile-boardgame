@@ -214,23 +214,22 @@ export default function BoardClient({ initial, token }: Props) {
             </span>}
           </h2>
           <div className="flex-1 overflow-y-auto no-scrollbar">
-            <table className={`w-full text-left ${isFinal ? 'text-xl' : 'text-xl'}`}>
-              <thead className="sticky top-0 bg-zinc-900/95 backdrop-blur-sm z-20 shadow-md">
-                <tr className="text-zinc-500 border-b-2 border-zinc-800">
-                  <th className={`pb-4 font-normal text-center ${isFinal ? 'w-20' : 'w-12'}`}>排名</th>
-                  <th className={`pb-4 font-normal ${isFinal ? 'pl-4' : 'pl-2'}`}>姓名</th>
-                  {isFinal && (
-                    <>
-                      <SortTh title="金錢" color="amber" sortKey="money" active={sortKey === 'money'} dir={sortDir} onClick={toggleSort} />
-                      <SortTh title="福份" color="teal" sortKey="blessing" active={sortKey === 'blessing'} dir={sortDir} onClick={toggleSort} />
-                      <SortTh title="健康" color="rose" sortKey="health" active={sortKey === 'health'} dir={sortDir} onClick={toggleSort} />
-                      <SortTh title="業力" color="purple" sortKey="karma" active={sortKey === 'karma'} dir={sortDir} onClick={toggleSort} />
-                      <SortTh title="重生次數" color="zinc" sortKey="rebirth_count" active={sortKey === 'rebirth_count'} dir={sortDir} onClick={toggleSort} />
-                      <SortTh title="最終分數" color="white" emphasized sortKey="final_score" active={sortKey === 'final_score'} dir={sortDir} onClick={toggleSort} />
-                    </>
-                  )}
-                </tr>
-              </thead>
+            <table className="w-full text-left text-xl">
+              {/* regular mode 14% 窄欄不需要表頭（圓圈+名字已自明），避免 sticky header 視覺脫節 */}
+              {isFinal && (
+                <thead className="sticky top-0 bg-zinc-900/95 backdrop-blur-sm z-20 shadow-md">
+                  <tr className="text-zinc-500 border-b-2 border-zinc-800">
+                    <th className="pb-4 font-normal text-center w-20">排名</th>
+                    <th className="pb-4 font-normal pl-4">姓名</th>
+                    <SortTh title="金錢" color="amber" sortKey="money" active={sortKey === 'money'} dir={sortDir} onClick={toggleSort} />
+                    <SortTh title="福份" color="teal" sortKey="blessing" active={sortKey === 'blessing'} dir={sortDir} onClick={toggleSort} />
+                    <SortTh title="健康" color="rose" sortKey="health" active={sortKey === 'health'} dir={sortDir} onClick={toggleSort} />
+                    <SortTh title="業力" color="purple" sortKey="karma" active={sortKey === 'karma'} dir={sortDir} onClick={toggleSort} />
+                    <SortTh title="重生次數" color="zinc" sortKey="rebirth_count" active={sortKey === 'rebirth_count'} dir={sortDir} onClick={toggleSort} />
+                    <SortTh title="最終分數" color="white" emphasized sortKey="final_score" active={sortKey === 'final_score'} dir={sortDir} onClick={toggleSort} />
+                  </tr>
+                </thead>
+              )}
               <tbody className="text-zinc-200">
                 {(isFinal ? lbFinalSorted.length : lbLive.length) === 0 ? (
                   <tr>

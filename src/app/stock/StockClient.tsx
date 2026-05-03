@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, useTransition, useEffect } from 'react';
 import {
-  TrendingUp, ArrowUpRight, ArrowDownRight, Minus, RefreshCcw, Search,
+  TrendingUp, ArrowUpRight, ArrowDownRight, RefreshCcw, Search,
   X, AlertCircle, CheckCircle2, ArrowLeft,
 } from 'lucide-react';
 import { getMyStats } from '@/app/actions/player';
@@ -253,11 +253,17 @@ function StockCard({
 }
 
 function PriceWithTrend({ price, trend }: { price: number; trend: 'up' | 'down' | 'flat' }) {
-  const Icon = trend === 'up' ? ArrowUpRight : trend === 'down' ? ArrowDownRight : Minus;
+  // flat 不顯示 icon（lucide Minus 看起來像負號會誤導），用 spacer 維持對齊
   const cls = trend === 'up' ? 'text-rose-400' : trend === 'down' ? 'text-emerald-400' : 'text-zinc-400';
   return (
     <div className={`flex items-center gap-1 ${cls}`}>
-      <Icon className="w-4 h-4" />
+      {trend === 'up' ? (
+        <ArrowUpRight className="w-4 h-4" />
+      ) : trend === 'down' ? (
+        <ArrowDownRight className="w-4 h-4" />
+      ) : (
+        <span className="w-4 h-4 inline-block" aria-hidden />
+      )}
       <span className="font-mono font-bold text-lg">{price.toLocaleString()}</span>
     </div>
   );
