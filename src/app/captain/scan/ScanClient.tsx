@@ -15,6 +15,7 @@ import {
   type CaptainStation,
   type QuickActionRow,
   type ScannedPlayer,
+  type PlayerScannedItem,
 } from '@/app/actions/captain';
 import { Search } from 'lucide-react';
 
@@ -34,6 +35,7 @@ interface InProgressItem {
 
 interface ScannedState {
   player: ScannedPlayer;
+  items: PlayerScannedItem[];
   qrToken: string | null;
   allowRebirth: boolean;
   /** 'qr' = 透過掃碼；'manual' = 透過手動輸入 ID（重生鍵不會出現） */
@@ -70,6 +72,7 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
       if (r.ok) {
         setScanned({
           player: r.data!.player,
+          items: r.data!.player_items,
           qrToken: token,
           allowRebirth: r.data!.allow_rebirth,
           source: 'qr',
@@ -95,6 +98,7 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
       if (r.ok) {
         setScanned({
           player: r.data!.player,
+          items: r.data!.player_items,
           qrToken: null,
           // 手動輸入路徑：強制不顯示重生鍵（規格 §4.2 / V2.md §下地獄機制）
           allowRebirth: false,
@@ -317,6 +321,29 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
             <Stat icon={<Heart className="w-3 h-3 text-rose-500" />} label="健康" value={`${scanned.player.health}/100`} />
             <Stat icon={<Sparkles className="w-3 h-3 text-teal-400" />} label="福分" value={scanned.player.blessing.toString()} />
             <Stat icon={<Scale className="w-3 h-3 text-purple-400" />} label="業力" value={scanned.player.karma.toString()} />
+          </div>
+
+          {/* 玩家道具（給關主判斷 req_item_id 是否符合）*/}
+          <div className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-2 mb-3">
+            <p className="text-[0.6875rem] text-zinc-500 mb-1.5 flex items-center gap-1">
+              🎒 持有道具（{scanned.items.length}）
+            </p>
+            {scanned.items.length === 0 ? (
+              <p className="text-xs text-zinc-600 text-center py-1">無</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {scanned.items.map((it) => (
+                  <span
+                    key={it.item_id + it.granted_at}
+                    title={it.description}
+                    className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-0.5 text-xs text-zinc-200"
+                  >
+                    <span>{it.icon}</span>
+                    <span>{it.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 死亡狀態 → 重生鍵 */}

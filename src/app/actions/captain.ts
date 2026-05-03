@@ -215,8 +215,18 @@ export interface ScannedPlayer {
   rebirth_count: number;
 }
 
+export interface PlayerScannedItem {
+  item_id: string;
+  name: string;
+  icon: string;
+  description: string;
+  granted_at: string;
+}
+
 export interface PlayerLookupResult {
   player: ScannedPlayer;
+  /** 玩家當前道具（依 granted_at desc 排序，captain 用以判斷是否符合 req_item_id） */
+  player_items: PlayerScannedItem[];
   allow_rebirth: boolean;
   station: CaptainStation;
   my_quick_actions: QuickActionRow[];
@@ -266,8 +276,19 @@ async function buildLookupResult(
     [captainUserId, stationId],
   );
 
+  // 玩家當前道具（含名稱 / icon / 描述）
+  const itemsR = await query<PlayerScannedItem>(
+    `SELECT pi.item_id, i.name, i.icon, i.description, pi.granted_at
+     FROM "PlayerItem" pi
+     JOIN "Item" i ON i.id = pi.item_id
+     WHERE pi.user_id = $1
+     ORDER BY pi.granted_at DESC`,
+    [targetUserId],
+  );
+
   return {
     player: playerR.rows[0],
+    player_items: itemsR.rows,
     allow_rebirth: stationCheck.allow_rebirth,
     station,
     my_quick_actions: qaR.rows,

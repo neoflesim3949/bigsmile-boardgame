@@ -42,6 +42,8 @@ async function decode(token: string): Promise<Session | null> {
 
 const PUBLIC_PATHS = ['/login', '/_next', '/favicon.ico', '/api/health'];
 const DISPLAY_PREFIX = '/display/';
+// 全 role 共用路由（player + captain + admin 都可訪問）
+const UNIVERSAL_AUTHED_PATHS = ['/settings'];
 
 function homeFor(role: Role): string {
   if (role === 'admin') return '/admin';
@@ -68,13 +70,18 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(url);
   }
 
+  // 全 role 共用路由（settings：主題 / 字級 / 登出，三 role 共用同一頁）
+  if (UNIVERSAL_AUTHED_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+    return NextResponse.next();
+  }
+
   // 角色路由保護
   if (pathname.startsWith('/admin')) {
     if (session.role !== 'admin') return NextResponse.redirect(new URL(homeFor(session.role), req.url));
   } else if (pathname.startsWith('/captain')) {
     if (session.role !== 'captain') return NextResponse.redirect(new URL(homeFor(session.role), req.url));
   } else {
-    // 玩家路由（/、/stock、/exchange、/bank、/transfer、/history、/onboarding、/settings）
+    // 玩家路由（/、/stock、/exchange、/bank、/transfer、/history、/onboarding）
     if (session.role !== 'player') {
       return NextResponse.redirect(new URL(homeFor(session.role), req.url));
     }
