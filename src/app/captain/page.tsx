@@ -1,8 +1,7 @@
 import Link from 'next/link';
-import { QrCode, Settings2, Plus, MapPin, AlertCircle } from 'lucide-react';
+import { QrCode, Settings2, Plus, MapPin, AlertCircle, Settings } from 'lucide-react';
 import { requireRole } from '@/lib/auth';
 import { listMyStations, listMyQuickActions } from '@/app/actions/captain';
-import { logout } from '@/app/actions/auth';
 
 export default async function CaptainPage() {
   const session = await requireRole('captain');
@@ -17,9 +16,13 @@ export default async function CaptainPage() {
           <h1 className="text-xl font-bold text-zinc-100">{session.name}</h1>
           <p className="text-zinc-500 text-xs">關主 · {session.userId}</p>
         </div>
-        <form action={logout}>
-          <button className="text-zinc-500 hover:text-rose-400 text-xs">登出</button>
-        </form>
+        <Link
+          href="/settings"
+          aria-label="設定"
+          className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-amber-400 hover:border-amber-500/50 transition-colors"
+        >
+          <Settings className="w-5 h-5" />
+        </Link>
       </header>
 
       {myStations.length === 0 && (

@@ -128,7 +128,14 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
     setInProgress((arr) => arr.filter((x) => x.key !== key));
   }
 
+  // 完成結算前的確認 modal — 玩家錯誤領獎會直接扣分發道具，需二次確認
+  const [confirmSettle, setConfirmSettle] = useState<InProgressItem | null>(null);
+
   function handleSettle(item: InProgressItem) {
+    setConfirmSettle(item);
+  }
+
+  function performSettle(item: InProgressItem) {
     busyTransition(async () => {
       const r = await applyQuickAction({
         quickActionId: item.quickAction.id,
@@ -142,6 +149,7 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
       } else {
         showToast(false, r.error?.message ?? '結算失敗');
       }
+      setConfirmSettle(null);
     });
   }
 
@@ -376,6 +384,63 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 ${toast.ok ? 'bg-zinc-900 border-amber-500/40 text-amber-300' : 'bg-rose-950 border-rose-700 text-rose-300'} border px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 text-xs max-w-[90vw] text-center`}>
           {toast.ok ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
           <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {confirmSettle && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4"
+          onClick={() => setConfirmSettle(null)}
+        >
+          <div
+            className="bg-zinc-900 border border-amber-500/40 rounded-2xl p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <CheckCircle2 className="w-6 h-6 text-amber-400 shrink-0" />
+              <h4 className="font-bold text-zinc-100 text-base">確認結算？</h4>
+            </div>
+            <p className="text-sm text-zinc-300 mb-3">
+              對 <span className="font-bold text-amber-400">{confirmSettle.player.name}</span> 套用快捷模組
+              <span className="font-bold text-zinc-100 mx-1">「{confirmSettle.quickAction.label}」</span>
+            </p>
+            <div className="bg-zinc-950 border border-zinc-700 rounded-lg p-3 mb-4 space-y-1 text-xs">
+              {confirmSettle.quickAction.delta_money !== 0 && (
+                <div className="flex justify-between"><span className="text-zinc-500">金錢</span><span className="text-amber-400 font-mono">{fmt(confirmSettle.quickAction.delta_money)}</span></div>
+              )}
+              {confirmSettle.quickAction.delta_health !== 0 && (
+                <div className="flex justify-between"><span className="text-zinc-500">健康</span><span className="text-rose-400 font-mono">{fmt(confirmSettle.quickAction.delta_health)}</span></div>
+              )}
+              {confirmSettle.quickAction.delta_blessing !== 0 && (
+                <div className="flex justify-between"><span className="text-zinc-500">福分</span><span className="text-teal-400 font-mono">{fmt(confirmSettle.quickAction.delta_blessing)}</span></div>
+              )}
+              {confirmSettle.quickAction.delta_karma !== 0 && (
+                <div className="flex justify-between"><span className="text-zinc-500">業力</span><span className="text-purple-400 font-mono">{fmt(confirmSettle.quickAction.delta_karma)}</span></div>
+              )}
+              {confirmSettle.quickAction.bound_item_name && (
+                <div className="flex justify-between"><span className="text-zinc-500">發放道具</span><span className="text-zinc-200">🎁 {confirmSettle.quickAction.bound_item_name}</span></div>
+              )}
+            </div>
+            <p className="text-[0.6875rem] text-zinc-500 mb-4 text-center">
+              ⚠️ 確認後立即生效，無法復原
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmSettle(null)}
+                disabled={busy}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2.5 rounded-lg text-sm font-bold border border-zinc-700 disabled:opacity-50 min-h-[44px]"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => performSettle(confirmSettle)}
+                disabled={busy}
+                className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-zinc-950 py-2.5 rounded-lg text-sm font-bold min-h-[44px]"
+              >
+                {busy ? '處理中…' : '確認結算'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
