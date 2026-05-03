@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useEffect } from 'react';
 import QrScannerModal from '@/components/QrScannerModal';
 import {
   ArrowLeft, QrCode, X, ListChecks, Skull, Sparkles,
@@ -21,8 +21,14 @@ import {
 import { Search } from 'lucide-react';
 
 interface Props {
+  captainUserId: string;
   stations: CaptainStation[];
   allQuickActions: QuickActionRow[];
+}
+
+const IN_PROGRESS_VERSION = 1;
+function inProgressStorageKey(captainUserId: string): string {
+  return `captain_inprogress_v${IN_PROGRESS_VERSION}_${captainUserId}`;
 }
 
 interface InProgressItem {
@@ -43,7 +49,7 @@ interface ScannedState {
   source: 'qr' | 'manual';
 }
 
-export default function ScanClient({ stations, allQuickActions }: Props) {
+export default function ScanClient({ captainUserId, stations, allQuickActions }: Props) {
   const [stationId, setStationId] = useState(stations[0]?.id ?? '');
   const station = stations.find((s) => s.id === stationId);
   const stationQuickActions = allQuickActions.filter((qa) => qa.station_id === stationId);
@@ -51,6 +57,32 @@ export default function ScanClient({ stations, allQuickActions }: Props) {
   const [scanOpen, setScanOpen] = useState(false);
   const [scanned, setScanned] = useState<ScannedState | null>(null);
   const [inProgress, setInProgress] = useState<InProgressItem[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  // 載入 localStorage 暫存（避免不小心離開頁面遺失進行列表）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(inProgressStorageKey(captainUserId));
+      if (raw) {
+        const parsed = JSON.parse(raw) as InProgressItem[];
+        if (Array.isArray(parsed)) setInProgress(parsed);
+      }
+    } catch { /* localStorage 不可用 / 解析失敗 → 從空白開始 */ }
+    setHydrated(true);
+  }, [captainUserId]);
+
+  // 每次 inProgress 變動寫回 localStorage（hydrated 後才寫，避免初始空陣列覆蓋）
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const key = inProgressStorageKey(captainUserId);
+      if (inProgress.length === 0) {
+        localStorage.removeItem(key);
+      } else {
+        localStorage.setItem(key, JSON.stringify(inProgress));
+      }
+    } catch { /* quota exceeded / private mode 等 → 忽略 */ }
+  }, [inProgress, captainUserId, hydrated]);
   const [scanErr, setScanErr] = useState<string | null>(null);
   const [manualId, setManualId] = useState('');
   const [busy, busyTransition] = useTransition();
