@@ -15,7 +15,7 @@
 - 特殊功能:**重生鍵** — 特定關卡的關主可對玩家執行「重生」：**全部歸零重來** — 四項參數重設為重生初始值、清空所有持股、清空銀行借款（含 `loan_updated_at`）、**清空所有道具**。**前置防呆**：玩家必須**主動**在地獄畫面把 QR 拿給關主掃（**手動輸入 ID 路徑不會出現重生鍵**，前後端雙重驗證），且後端 pg tx 內即時驗證 `health ≤ 0 || blessing ≤ 0`，未死亡的玩家不能被任意重置
 - 玩家進入頁面時若 `AppSettings.CardDrawMode==='true'` 且 `destiny_name=NULL` → middleware 強制導 `/onboarding` 抽命格範本（隨機從啟用中 `InitialValueTemplate` 抽一張）；抽完才能進 `/`。**觸發條件不是「首次登入」**：只要兩條件同時成立（抽卡模式開啟 + 尚無命格）就會被導向，無論第幾次進站。若 `CardDrawMode==='false'` 或玩家已有 `destiny_name`，自行進 `/onboarding` 一律被擋回 `/`
 - 主題：`/admin/*` 與 `/display/*` **強制深色 + md 字級**；其他路由跟玩家偏好（`pref_theme` / `pref_font_size` localStorage）。詳見架構文件 §12.3
-- **回合制**：主持人後台按「下一回合」按鈕同時推進股價 + 結算所有借款利息（每 10 分鐘 1 次，120 分鐘共 12 回合）；**不用 cron**（Supabase 免費版不支援）
+- **回合制**：主持人後台按「下一回合」按鈕同時推進股價 + 結算所有借款利息（每 10 分鐘 1 次，120 分鐘共 12 回合）；**不用 cron**（Supabase 免費版不支援）。**第 1 回合推進時自動關閉 `TourMode`**（admin 從 demo 進入正式遊戲）；`tickRound` 內驗 `BoardGameEnabled === 'true'` 與 `final_scoring_triggered_at IS NULL`，不符直接拒絕
 - 預期負載：單場 2 小時活動、**≤ 500 人**同時在線、1～3 台大屏幕
 - 股市：**≤ 10 檔**、玩家 ↔ 大會（系統）交易、**無 P2P 撮合**、依當下 `current_price` 即時成交。具備「前台顯示 / 不顯示」與「可賣 / 不可賣」屬性；不顯示的商品，玩家仍可透過代碼搜尋進入購買。
 - **不輪詢**：玩家頁進入 / 下拉刷新 / 自身 action response 才更新；看板靠 Realtime 推 + 60 秒 fallback；徹底避開 500 人輪詢洪流
@@ -174,7 +174,11 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - 「開啟活動看板」link → `/admin/events`（去發 display token）
 
 **B. 3 控制台**
-- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（兩 tx + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）
+- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（兩 tx + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）。前置條件：`BoardGameEnabled='true'` && 終局未觸發；不符直接 FORBIDDEN。第 1 回合推進時 UPSERT `TourMode='false'`。三個控制面板等高 `xl:h-[420px]`，推進歷史內部 `h-32` fixed scroll，內容超過走滾動不撐高 panel
+- **股票腳本值 = 0 的語意**：`StockRoundScript.change_value`（`/admin/stocks` 回合腳本總表）允許設 0：
+  - `fixed = 0`：該回合股價直接歸零（暴跌劇情）。後端 `buyStock` 加 guard 拒絕 `price <= 0` 的買單；前端股市買進按鈕顯示「停止交易」disabled
+  - `percent = 0`：該回合股價鎖定**不變動**（與「無腳本走 ±5% 隨機」不同）
+  - 前端 admin 編輯 cell：值為 0 **不該觸發 cell 刪除**，只有空值或非數字才刪
 - **即時跑馬燈廣播**：textarea + 發送 / 清除 → `publishMarquee` / `clearMarquee`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
 - **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上。**「自訂」用內建 modal**（不要用 `window.prompt` — mobile Safari / 部分桌面 Chrome 會靜默擋）。**前後端必須同時套用倍率且公式一致**：`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用 `effective_per_unit = round(money_gain_per_unit × mult)`、`total = effective_per_unit × units`（先 round 再乘，避免「顯示 +200、實際 +199」的 rounding 爭議）。**禁止**只在後端套倍率不在前端 list 套，否則玩家看到的「將獲得」與實際入帳會不一致
 
@@ -355,6 +359,9 @@ app/
 - [ ] `tickRound` 沒驗 `BoardConfig.last_tick_at` 距今 ≥ 30 秒（防主持人連按 / 重複觸發）；通過後再做股價更新與利息結算
 - [ ] 玩家寫入操作（換匯、轉帳、股市買賣）沒檢查死亡狀態（`health ≤ 0 || blessing ≤ 0` → 拒絕，回傳 `PLAYER_DEAD`）
 - [ ] 股票相關 server action 沒檢查 `role==='player'`（admin / captain 不該下單）
+- [ ] `tickRound` 沒驗 `BoardGameEnabled === 'true'`（遊戲未開始就能推進回合）或 `final_scoring_triggered_at IS NULL`（已結算還能 tick）
+- [ ] `buyStock` 沒驗 `current_price > 0`（fixed=0 暴跌劇情下玩家可 free 拿股）
+- [ ] admin StocksClient 編輯回合腳本 cell：把 `num === 0` 當作刪除條件（破壞 fixed=0 / percent=0 兩種合法值）
 
 ### 設定
 - [ ] 直接 `.from('AppSettings').select()` 而非走 `getSetting` helper
@@ -366,9 +373,13 @@ app/
 ### UI
 - [ ] 寫死 px 沒考慮手機版
 - [ ] 玩家 / 關主前台路由用 `text-[Npx]` 寫死字級 — 字級偏好設定會無法縮放，**必須改 `text-[Nrem]`**（10px → `text-[0.625rem]`、11px → `text-[0.6875rem]`）；後台 / 看板因強制 md 不受此限
-- [ ] 漲跌只用紅綠沒加箭頭
+- [ ] 漲跌只用紅綠沒加箭頭（color-blind 友善必加 ↑↓）；**flat / 持平**用 `lucide Minus` icon（`−` 形狀）會被誤認為「股價是負數」，要改成 invisible spacer 維持對齊
 - [ ] 觸控目標 < 44px
 - [ ] Scanner 沒用 dynamic import 導致 SSR 錯誤
+- [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補
+- [ ] 看板 `/display/board` 終局結算後 toggle 「返回常規模式」無效 — 不可寫 `isFinal = forceFinal || final_scoring_triggered_at`（被 server 鎖死），要改成 `userOverride !== null ? userOverride : serverIsFinal` 讓 user 真的能切回看股市
+- [ ] 看板風雲榜 regular 模式（14% 窄欄）若用 sticky thead 會視覺脫節 → 整個 thead 不渲染，圓圈+姓名自明
+- [ ] 玩家日常頁（地獄畫面 / settings 預覽 / history 提示）`ShowAllStats=false` 時直接寫「福分」「業力」字眼 → 違反 §6.2 字眼可見範圍（必須改用「指標」「隱藏參數」籠統字眼，admin / captain 後台 / onboarding / 最終結算可見）
 
 ---
 

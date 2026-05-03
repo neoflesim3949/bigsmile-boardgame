@@ -627,7 +627,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `updateGameSettings(payload)` | 統一更新參數設定（活動時間、匯率、比分權重、新手參數、重生參數；批次 upsert `AppSettings`） | 無 |
 | `upsertStock(payload)` | 新增/編輯股市商品 | 無 |
 | `setStockPrice(stockId, price)` | 即時手動調整單檔股價（不等回合，自動寫入歷史） | pg tx |
-| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — Tx1 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory` + 若 `StockRoundEvent` 有此回合文字則 UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min` + `BoardConfig.current_round += 1`；Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（每回合固定金額，不做比例計算）。30 秒 debounce 防誤點（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
+| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — **前置 guard**：Tx1 開頭驗 `BoardGameEnabled === 'true'` && `final_scoring_triggered_at IS NULL`，不符直接 `FORBIDDEN`。Tx1 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory` + 若 `StockRoundEvent` 有此回合文字則 UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min` + `BoardConfig.current_round += 1`；**第 1 回合**（newRound === 1）UPSERT `AppSettings TourMode = 'false'`（admin 從 demo 進入正式遊戲，自動關閉導覽模式以解鎖玩家寫入）；寫 `round_tick` Transaction 紀錄。Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（按 balance/principal 比例算）。30 秒 debounce（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
 | `triggerFinalScoring()` | 觸發終局結算：寫 `BoardConfig.final_scoring_triggered_at = now()`；之後玩家寫入全部被 `assertNotDuringFinalScoring` 擋；看板自動切到排行榜畫面。**不可復原**（要再玩請走 `restartGameCycle`） | pg tx |
 | `restartGameCycle()` | **重啟新一場（核重置）**：在 pg tx 內清空：(1) PlayerStats 四項數值 / 命格 / 重生計數 / bank_loan / loan_updated_at / last_manual_refresh_at；(2) StockHolding / PlayerLoan / PlayerItem；(3) StockHistory / StockRoundScript / StockRoundEvent；(4) StationUsage / QuickActionUsage、Station 與 QuickAction 的 global_use_count；(5) BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at / featured_stock_ids）；(6) Event.is_active = false（保留事件定義但全部停用）。tx 外重設 AppSettings 旗標（`BoardGameEnabled` / `BoardGameStartedAt` / `CardDrawMode` / `TourMode` 全部 false/空）。**保留**：Account / Stock 商品定義（current_price 保留）/ Item / Station / QuickAction / InitialValueTemplate / ExchangeOption / BankLoanOption / Transaction 稽核。Dashboard 已計分時把「已計分」按鈕換成此功能，**前端強制 5 次確認彈窗** | pg tx |
 | `setStockPriceRule(rule)` | 設定 `AppSettings.StockPriceRule`（下回合用的漲跌規則） | 無 |
@@ -951,26 +951,9 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 - 預設 TTL：活動天數 + 1（避免活動中過期）；可手動撤銷
 - 後端讀取時驗章 + 比對 `revoked_tokens` 黑名單；任何寫入請求一律拒絕
 
-### 看板畫面結構
+### 看板畫面結構（→ 已整併至 [§16.5](#165-看板路由實況)）
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│  [LOGO]  開運大富翁 ── 大廳        ⏰ 14:23:45  📅 04/29   🟢      │
-├──────────────────────────────┬─────────────────────────────────────┤
-│   重點曲線（最多 4 檔）      │           行情總表                  │
-│                              │                                     │
-│   ┌──────┐ ┌──────┐          │ 代碼  名稱  價  漲跌                │
-│   │ 大圖 │ │ 大圖 │          │ AAA   XXX  100  +5%                │
-│   └──────┘ └──────┘          │ BBB   YYY   80  -2%                │
-│   ┌──────┐ ┌──────┐          │ CCC   ZZZ  120  +8%                │
-│   │ 大圖 │ │ 大圖 │          │ …                                  │
-│   └──────┘ └──────┘          │                                     │
-├──────────────────────────────┴─────────────────────────────────────┤
-│  📢 事件：「股神就是你！下午茶時段加碼開始…」                       │
-├────────────────────────────────────────────────────────────────────┤
-│  📢 跑馬燈：「歡迎各位道友蒞臨開運大富翁活動會場…」                 │
-└────────────────────────────────────────────────────────────────────┘
-```
+> 完整版型骨架（54/32/14 三欄、grid 2×3 重點趨勢最多 6 檔、最終結算全寬、toggle userOverride 邏輯、風雲榜 regular 不渲染 thead 等）統一在 §16.5 維護。本節保留「區塊定義」表記錄資料來源與更新時機（技術層）。
 
 ### 區塊定義
 
@@ -1063,28 +1046,12 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 
 ### 後台管理（Admin → 活動看板）
 
-#### 看板版型
-- 選擇重點曲線商品（拖拉排序，最多 4 檔）
-- 編輯頁首標題 `BoardConfig.title`
-- 切換配色方向（紅漲綠跌 / 綠漲紅跌）
-- 設定事件輪播間隔 `BoardConfig.event_rotate_seconds`
-
-#### 事件管理
-- 列表 + 「新增事件」表單：`title`、`text`、`start_at`、`end_at`、`priority`、`is_active`
-- 支援排程：可預先建立未來事件，到時間自動上檔
-- 「測試播放」按鈕：在後台預覽該事件在看板上的顯示效果
-
-#### 跑馬燈
-- 單一文字輸入框 + 顯示分鐘數下拉，選項依 `BoardMarqueeMaxMinutes` 動態產生（預設 120 時：5 / 15 / 30 / 60 / 120 分鐘 + 自訂 1 ～ MAX）
-- 自訂輸入若超過 `BoardMarqueeMaxMinutes`：前端禁用送出按鈕並顯示「最多 N 分鐘」；後端再次校驗，超過則回 400
-- 「立即發布」按鈕 → `publishMarquee(text, minutes)`，後端寫 `BoardConfig.marquee_until = now() + minutes * 60s`
-- 「立即清除」按鈕 → `clearMarquee()`
-- 顯示目前生效中的跑馬燈文字與剩餘分鐘數
-- 上限值由「看板版型」區提供獨立輸入框調整 `BoardMarqueeMaxMinutes`（不同活動場次可改）
-
-#### 顯示連結
-- 「產生顯示連結」按鈕：呼叫 `issueDisplayToken` → 顯示 QR + 短連結，現場掃碼即可開啟看板
-- 「已發行 token 列表」：顯示用途備註、發行時間、剩餘 TTL，可撤銷
+> 完整 admin 操作介面（事件 CRUD、看板畫面設定、display token 發行 / 撤銷）統一整理至 [§16.4 `/admin/events`](#1644-adminevents事件--看板配置--display-token三合一)。本節僅保留功能概要：
+>
+> - **看板版型**：選擇重點曲線商品（**最多 6 檔**，對齊 §16.5 grid 2×3）/ 標題 / 配色方向 / 事件輪播間隔
+> - **事件管理**：CRUD `Event` 表（text、start_at、end_at、priority、is_active）
+> - **跑馬燈**：`publishMarquee(text, minutes)` / `clearMarquee()`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
+> - **Display Token**：`issueDisplayToken` 產 QR + 短連結，可撤銷
 
 ---
 
@@ -1507,6 +1474,12 @@ npm run lint     # ESLint 檢查
 └──────────────────────────────────────────────┘
 ```
 
+**色盲友善**：漲跌**必加** ↑↓ 箭頭。`flat`（持平）**不可用 lucide `Minus` icon**（`−` 形狀會被誤認為「股價是負數」），改用 invisible spacer 維持對齊。
+
+**持股區字級**：`text-sm` label + `text-base` 值 + `text-lg` 利潤；背景 `bg-zinc-800/60 + border-zinc-700/60`（深色明顯、淺色有邊框）。
+
+**停止交易**：當 `current_price <= 0`（admin fixed=0 暴跌劇情），買進按鈕 disabled 顯示「停止交易」；後端 `buyStock` 拒絕 `price <= 0` 的買單。
+
 #### `/exchange`（換匯所，禁顯示福分）
 
 ```text
@@ -1789,6 +1762,12 @@ npm run lint     # ESLint 檢查
 
 #### `/admin`（總覽面板 AdminDashboardClient）
 
+**版型細節**：
+- 三個控制 panel（回合控制 / 跑馬燈 / 換匯權重）使用 `xl:auto-rows-fr + xl:h-[420px]` 等高
+- 推進歷史 list `h-32` fixed scroll，超過 3-4 筆走滾動，**panel 整體不會跟著歷史變高**
+- 「推進下一回合」按鈕 disabled 條件：`busy || data.scoring.enabled || !data.flags.game_enabled`
+- 推進第 1 回合會自動 UPSERT `TourMode='false'`（admin 從 demo 進入正式遊戲）
+
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ 📊 總覽面板    [導覽] [抽卡] [遊戲開始/結束] [重置系統(已計分)] [📺 開啟看板] │
@@ -1972,6 +1951,16 @@ npm run lint     # ESLint 檢查
 
 #### `/display/board`（活動看板，1920×1080，強制深色 + pointer-events-none）
 
+**toggle 邏輯**：右上「展開最終榜單 / 返回常規模式」用 `userOverride: boolean | null` state：
+- `null`：跟 server 狀態 `final_scoring_triggered_at`
+- `true / false`：user 主動 toggle 鎖定值，不再被 server 蓋過
+- 公式：`isFinal = userOverride !== null ? userOverride : serverIsFinal`
+- 用途：終局結算後仍可切回常規看股市（不會被 final_scoring 鎖死）
+
+**風雲榜表頭**：
+- regular 模式（14% 窄欄）：整個 `<thead>` **不渲染**（圓圈獎牌 + 姓名自明，sticky thead 在窄欄會視覺脫節）
+- final 模式（全寬 8 欄）：保留 sticky thead 給排序按鈕用
+
 ```text
 常規模式（活動進行中）：54 / 32 / 14 三欄
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -2081,7 +2070,49 @@ const FORCE_DARK_PREFIXES = ['/admin', '/display'];
 
 ---
 
-### 16.10 福分／福報字眼可見範圍（CRITICAL）
+### 16.10 淺色模式 globals.css 覆蓋規則（CRITICAL）
+
+`globals.css` 的 `[data-theme="light"]` 區塊用 escape 斜線（`.bg-zinc-XXX\/YY`）為各種 Tailwind 半透明色定義淺色版本。**新增 UI 用到新類別前，先 grep 確認 globals.css 有覆蓋**，否則淺色頁面會看到原 zinc/emerald-950 暗底，使用者無法閱讀。
+
+#### 已覆蓋的類別（截至 2026-05-03）
+
+| 類別前綴 | 覆蓋透明度 | 對應淺色語意 |
+|---------|----------|-------------|
+| `bg-zinc-950/` | 95、80、60、50、40 | 頁底 / 卡片 inset → `#f8f8f8` 或 `#f4f4f5` 半透明 |
+| `bg-zinc-900/` | 95、80、60、50、40 | 卡片底 → 白色半透明 |
+| `bg-zinc-800/` | 80、60、50、40 | 內框 / 暗灰 → `#f0f0f1` |
+| `bg-zinc-700/` | 80、60 | 邊框 / 較深 → `#e4e4e7` |
+| `bg-emerald-500/` | 5、10 | 持股高亮 / 成功 → 12-18% emerald |
+| `bg-amber-500/` | 5、10 | 選中卡片 / CTA tint → 15-20% amber |
+| `bg-teal-500/` | 10、20 | 倍率徽章 → 18-20% teal |
+| `bg-rose-500/` | 10 | 警示 → 15% rose |
+| `bg-emerald-950/` | 30、40 | 成功 toast 底 → emerald-100 alpha |
+| `bg-rose-950/` | 30、40 | 錯誤 toast / 終局 banner → rose-100 alpha |
+| `bg-amber-950/` | 30、40 | 「活動尚未開始」banner → amber-100 alpha |
+| `bg-sky-950/` | 30、40 | 「導覽中」banner → sky-100 alpha |
+| `bg-purple-950/` | 30、40 | 重生鍵徽章 → purple-100 alpha |
+| `border-emerald/rose/amber/sky/purple-900\|700` | 60、40 | 對應 banner 邊框 → 300 系列 |
+| `text-zinc-100/200/300/400/500/600` | — | → zinc-900/800/700/600/500/400（深色） |
+| `text-emerald-300、text-rose-300` 等狀態文字 | — | → -700/800（深色獲對比） |
+| `disabled:opacity-50` | — | → `0.7`（避免白底文字太淡） |
+
+#### 新增規則的 SOP
+
+1. 寫 component 時用 `bg-zinc-XXX/YY`、`bg-COLOR-950/YY`、`border-COLOR-900/YY` 等
+2. **改完後立即在淺色模式測一次**（`/settings` 切到淺色）
+3. 若有看不清的灰底白字 → grep `globals.css` 確認該類別有覆蓋
+4. 沒覆蓋就**直接補上**（escape 斜線：`.bg-zinc-950\/45 { ... }`）
+5. CSS 規則排序：rule 越後越優先，所以新規則放在現有區塊末尾
+6. 新增類別後 commit message 標註 `theme/light:` 開頭便於後續 grep 追蹤
+
+#### 常見錯誤
+
+- ❌ 直接寫 `text-emerald-300` 用在 toast — 淺色底 emerald-300 太淡看不清
+- ✅ 在 toast 內配合 `bg-emerald-950/40` 一起用，並確認 globals 把 `.text-emerald-300` 在淺色 override 為 -700
+- ❌ 用 `bg-zinc-950/50` 沒事先確認 globals 有規則 → 淺色變半透明黑底文字幾乎隱形
+- ❌ disabled 卡片只用 `opacity-50` → 淺色白底再 50% 變灰白模糊不可讀
+
+### 16.11 福分／福報字眼可見範圍（CRITICAL）
 
 對齊 CLAUDE.md §6.2，「福分」「福報」（同義）字眼出現規範：
 
