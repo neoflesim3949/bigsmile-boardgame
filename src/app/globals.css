@@ -220,7 +220,40 @@ body {
   .bg-emerald-500\/5  { background-color: rgba(16, 185, 129, 0.12) !important; }
   .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.18) !important; }
   .bg-teal-500\/10    { background-color: rgba(20, 184, 166, 0.18) !important; }
+  .bg-teal-500\/20    { background-color: rgba(20, 184, 166, 0.20) !important; }
   .bg-rose-500\/10    { background-color: rgba(244, 63, 94, 0.15) !important; }
+
+  /* ── 狀態 banner / toast 底色（emerald/rose/amber/sky/purple-950 系列）──
+     深色底用 950 半透明（接近黑底有色暈），淺色底必須用 100 系列才看得清 ── */
+  .bg-emerald-950\/40 { background-color: rgba(220, 252, 231, 0.9) !important; } /* emerald-100 */
+  .bg-emerald-950\/30 { background-color: rgba(220, 252, 231, 0.7) !important; }
+  .border-emerald-900\/60 { border-color: rgb(110, 231, 183) !important; } /* emerald-300 */
+  .border-emerald-900\/40 { border-color: rgba(110, 231, 183, 0.6) !important; }
+
+  .bg-rose-950\/40 { background-color: rgba(254, 226, 226, 0.9) !important; } /* rose-100 */
+  .bg-rose-950\/30 { background-color: rgba(254, 226, 226, 0.7) !important; }
+  .border-rose-900\/60 { border-color: rgb(252, 165, 165) !important; } /* rose-300 */
+  .border-rose-900\/40 { border-color: rgba(252, 165, 165, 0.6) !important; }
+
+  .bg-amber-950\/30 { background-color: rgba(254, 243, 199, 0.7) !important; } /* amber-100 */
+  .bg-amber-950\/40 { background-color: rgba(254, 243, 199, 0.9) !important; }
+  .border-amber-900\/60 { border-color: rgb(252, 211, 77) !important; } /* amber-300 */
+  .border-amber-900\/40 { border-color: rgba(252, 211, 77, 0.6) !important; }
+
+  .bg-sky-950\/30 { background-color: rgba(224, 242, 254, 0.7) !important; } /* sky-100 */
+  .bg-sky-950\/40 { background-color: rgba(224, 242, 254, 0.9) !important; }
+  .border-sky-700\/60 { border-color: rgb(125, 211, 252) !important; } /* sky-300 */
+
+  .bg-purple-950\/30 { background-color: rgba(243, 232, 255, 0.7) !important; } /* purple-100 */
+  .bg-purple-950\/40 { background-color: rgba(243, 232, 255, 0.9) !important; }
+  .border-purple-900\/60 { border-color: rgb(216, 180, 254) !important; } /* purple-300 */
+
+  /* 狀態文字色（淺色底 -300 太淡 → -700/800 對比）*/
+  .text-emerald-300 { color: #047857 !important; } /* emerald-700 */
+  .text-rose-300    { color: #b91c1c !important; } /* red-700  */
+  .text-amber-300   { color: #b45309 !important; } /* amber-700 */
+  .text-sky-300     { color: #0369a1 !important; } /* sky-700  */
+  .text-purple-300  { color: #6b21a8 !important; } /* purple-800 */
 
   /* ── disabled 元素淺色模式對比加強 ──
      opacity-50 在白底會讓字幾乎隱形 → 改用 grayscale + 文字色加深 ── */

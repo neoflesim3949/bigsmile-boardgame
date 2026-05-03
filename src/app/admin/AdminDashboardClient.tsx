@@ -282,9 +282,9 @@ export default function AdminDashboardClient({ initial }: Props) {
       </div>
 
       {/* Row 2: Control Panels */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mb-8">
-        {/* 回合控制 */}
-        <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-blue-500 flex flex-col justify-between">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mb-8 xl:auto-rows-fr">
+        {/* 回合控制 — 三個 panel 共用 auto-rows-fr 等高 + 內部 h-[420px] 固定 */}
+        <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-blue-500 flex flex-col justify-between xl:h-[420px]">
           <div>
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold text-zinc-300">回合控制面板</h3>
@@ -331,8 +331,8 @@ export default function AdminDashboardClient({ initial }: Props) {
           </div>
         </div>
 
-        {/* 跑馬燈 */}
-        <div className="glass-panel p-6 rounded-2xl flex flex-col justify-between">
+        {/* 跑馬燈 — 同 320 高 */}
+        <div className="glass-panel p-6 rounded-2xl flex flex-col justify-between xl:h-[420px]">
           <div>
             <h3 className="text-lg font-semibold text-zinc-300 mb-4">即時跑馬燈廣播</h3>
             <textarea
@@ -370,8 +370,8 @@ export default function AdminDashboardClient({ initial }: Props) {
           </div>
         </div>
 
-        {/* 換匯所即時權重 */}
-        <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-teal-500 flex flex-col justify-between">
+        {/* 換匯所即時權重 — 同 420 高 */}
+        <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-teal-500 flex flex-col justify-between xl:h-[420px]">
           <div>
             <h3 className="text-lg font-semibold text-zinc-300 mb-4 flex items-center justify-between gap-2">
               <span>換匯所即時權重控制</span>

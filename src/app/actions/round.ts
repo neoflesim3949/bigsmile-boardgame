@@ -48,6 +48,16 @@ export async function tickRound(): Promise<
       }
       const newRound = upd.rows[0].current_round;
 
+      // 第 1 回合推進後自動關閉導覽模式（admin 已從 demo 進入正式遊戲）
+      // 用 UPSERT 寫 TourMode='false'，與 setSetting helper 同 schema
+      if (newRound === 1) {
+        await client.query(
+          `INSERT INTO "AppSettings" (key, value, updated_at)
+           VALUES ('TourMode', 'false', now())
+           ON CONFLICT (key) DO UPDATE SET value = 'false', updated_at = now()`,
+        );
+      }
+
       // 取得本回合的腳本（若有）
       const scripts = await client.query<{
         stock_id: string; change_type: 'percent' | 'fixed'; change_value: number;
