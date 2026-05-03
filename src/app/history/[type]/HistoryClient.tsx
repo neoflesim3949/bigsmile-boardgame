@@ -96,8 +96,12 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
       return null;
     }
     case 'bank_borrow': {
-      const amt = n(payload.amount);
-      return amt != null ? `借入 $${amt.toLocaleString()}` : null;
+      // 合約化 schema 後改用 principal；保留 amount fallback 兼容舊紀錄
+      const amt = n(payload.principal) ?? n(payload.amount);
+      const label = s(payload.loan_label);
+      return amt != null
+        ? (label ? `借入 ${label} $${amt.toLocaleString()}` : `借入 $${amt.toLocaleString()}`)
+        : null;
     }
     case 'bank_repay': {
       const amt = n(payload.amount);

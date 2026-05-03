@@ -926,7 +926,8 @@ function extractDelta(txType: string, payload: Record<string, unknown>, type: Hi
   }
   if (txType === 'bank_borrow') {
     if (type === 'money') {
-      const v = payload['money_delta'];
+      // 合約化 schema 後改用 principal；保留 money_delta fallback 兼容舊紀錄
+      const v = payload['principal'] ?? payload['money_delta'];
       return typeof v === 'number' ? v : null;
     }
     return 0;
