@@ -218,12 +218,18 @@ function StockCard({
       </div>
 
       {hasHolding && (
-        <div className="grid grid-cols-2 gap-2 text-xs mt-2 mb-3 bg-zinc-950/50 rounded-lg p-2">
-          <div className="flex justify-between"><span className="text-zinc-500">持股</span><span className="text-emerald-400 font-medium">{stock.shares} 股</span></div>
-          <div className="flex justify-between"><span className="text-zinc-500">均價</span><span className="text-zinc-300">{stock.avg_cost.toLocaleString()}</span></div>
-          <div className="flex justify-between col-span-2">
-            <span className="text-zinc-500">預期賣出利潤</span>
-            <span className={stock.expected_profit >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+        <div className="grid grid-cols-2 gap-2 text-sm mt-2 mb-3 bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3">
+          <div className="flex justify-between items-baseline">
+            <span className="text-zinc-400">持股</span>
+            <span className="text-emerald-400 font-bold text-base">{stock.shares} 股</span>
+          </div>
+          <div className="flex justify-between items-baseline">
+            <span className="text-zinc-400">均價</span>
+            <span className="text-zinc-200 font-bold text-base">{stock.avg_cost.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between items-baseline col-span-2 border-t border-zinc-700/40 pt-2 mt-1">
+            <span className="text-zinc-400">預期賣出利潤</span>
+            <span className={`font-bold text-lg ${stock.expected_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {stock.expected_profit >= 0 ? '+' : ''}{stock.expected_profit.toLocaleString()}
             </span>
           </div>

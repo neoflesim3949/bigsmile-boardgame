@@ -193,9 +193,13 @@ body {
 
   /* ── 帶透明度的版本（Tailwind v4 會生成 .bg-zinc-XXX\/YY 字面 class）──
      必須 escape 斜線；否則整片頁面會在淺色模式留下深色 ── */
+  .bg-zinc-950\/95 { background-color: rgba(248, 248, 248, 0.96) !important; }
   .bg-zinc-950\/80 { background-color: rgba(248, 248, 248, 0.92) !important; }
   .bg-zinc-950\/60 { background-color: rgba(248, 248, 248, 0.85) !important; }
+  .bg-zinc-950\/50 { background-color: rgba(244, 244, 245, 0.80) !important; } /* 淺灰底卡 inset */
+  .bg-zinc-950\/40 { background-color: rgba(244, 244, 245, 0.70) !important; }
 
+  .bg-zinc-900\/95 { background-color: rgba(255, 255, 255, 0.96) !important; }
   .bg-zinc-900\/80 { background-color: rgba(255, 255, 255, 0.92) !important; }
   .bg-zinc-900\/60 { background-color: rgba(255, 255, 255, 0.85) !important; }
   .bg-zinc-900\/50 { background-color: rgba(255, 255, 255, 0.80) !important; }
@@ -203,9 +207,27 @@ body {
 
   .bg-zinc-800\/80 { background-color: rgba(240, 240, 241, 0.92) !important; }
   .bg-zinc-800\/60 { background-color: rgba(240, 240, 241, 0.85) !important; }
+  .bg-zinc-800\/50 { background-color: rgba(244, 244, 245, 0.85) !important; }
+  .bg-zinc-800\/40 { background-color: rgba(244, 244, 245, 0.70) !important; }
 
   .bg-zinc-700\/80 { background-color: rgba(228, 228, 231, 0.92) !important; }
   .bg-zinc-700\/60 { background-color: rgba(228, 228, 231, 0.85) !important; }
+
+  /* ── 強調色低透明度版本（5% / 10% / 20%）──
+     深色底 5% amber 看得到、淺色底 5% 幾乎隱形 → 提高到 15-20% 才有對比 ── */
+  .bg-amber-500\/5    { background-color: rgba(245, 158, 11, 0.15) !important; }
+  .bg-amber-500\/10   { background-color: rgba(245, 158, 11, 0.20) !important; }
+  .bg-emerald-500\/5  { background-color: rgba(16, 185, 129, 0.12) !important; }
+  .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.18) !important; }
+  .bg-teal-500\/10    { background-color: rgba(20, 184, 166, 0.18) !important; }
+  .bg-rose-500\/10    { background-color: rgba(244, 63, 94, 0.15) !important; }
+
+  /* ── disabled 元素淺色模式對比加強 ──
+     opacity-50 在白底會讓字幾乎隱形 → 改用 grayscale + 文字色加深 ── */
+  .disabled\:opacity-50:disabled,
+  *[disabled].opacity-50 {
+    opacity: 0.7 !important;
+  }
 
   /* ── 文字色 ── */
   .text-zinc-100 {
