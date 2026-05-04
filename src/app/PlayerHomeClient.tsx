@@ -388,49 +388,49 @@ function FinalScoreModal({
           <p className="text-xs text-zinc-500 mt-1">活動已結束，恭喜完成這場開運大富翁</p>
         </div>
 
-        {/* 排名大字 */}
+        {/* 排名大字 — 標籤字級對齊「確認」button (text-base) */}
         <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-5 text-center mb-4">
-          <p className="text-xs text-zinc-500 mb-1">你的排名</p>
+          <p className="text-base text-zinc-500 mb-1">你的排名</p>
           <p className={`text-6xl font-black ${rankClass} flex items-center justify-center gap-2`}>
             <span>{medalEmoji}</span>
             <span>第 {stats.final_rank}</span>
           </p>
-          <p className="text-zinc-500 text-sm mt-1">/ 共 {stats.total_players} 位玩家</p>
+          <p className="text-zinc-500 text-base mt-1">/ 共 {stats.total_players} 位玩家</p>
           <div className="mt-4 pt-4 border-t border-zinc-800/60">
-            <p className="text-xs text-zinc-500 mb-1">最終分數</p>
+            <p className="text-base text-zinc-500 mb-1">最終分數</p>
             <p className="text-4xl font-black text-amber-400">{stats.final_score.toLocaleString()}</p>
           </div>
         </div>
 
-        {/* 命格 / 狀態 + 四項數值 */}
-        <div className="grid grid-cols-2 gap-2 text-xs mb-4">
-          <div className={`rounded-lg p-2 border ${dt.card}`}>
-            <p className="text-zinc-500 mb-0.5">命格</p>
-            <p className={`font-bold ${dt.text}`}>{stats.destiny_name ?? '—'}</p>
+        {/* 命格 / 狀態 + 四項數值（每格用各自色系半透明底 + base 字級，淺色模式也清晰）*/}
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <div className={`rounded-lg p-3 border ${dt.card}`}>
+            <p className="text-zinc-500 text-sm mb-1">命格</p>
+            <p className={`font-bold text-base ${dt.text}`}>{stats.destiny_name ?? '—'}</p>
           </div>
-          <div className={`rounded-lg p-2 border ${kt.card}`}>
-            <p className="text-zinc-500 mb-0.5">狀態</p>
-            <p className={`font-bold ${kt.text}`}>{stats.karma_band_label ?? '—'}</p>
+          <div className={`rounded-lg p-3 border ${kt.card}`}>
+            <p className="text-zinc-500 text-sm mb-1">狀態</p>
+            <p className={`font-bold text-base ${kt.text}`}>{stats.karma_band_label ?? '—'}</p>
           </div>
-          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
-            <p className="text-zinc-500 mb-0.5">金錢</p>
-            <p className="font-bold text-amber-400">${stats.money.toLocaleString()}</p>
+          <div className="rounded-lg p-3 bg-amber-500/10 border border-amber-500/30">
+            <p className="text-zinc-500 text-sm mb-1">金錢</p>
+            <p className="font-bold text-base text-amber-400">${stats.money.toLocaleString()}</p>
           </div>
-          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
-            <p className="text-zinc-500 mb-0.5">健康</p>
-            <p className="font-bold text-rose-400">{stats.health}/100</p>
+          <div className="rounded-lg p-3 bg-rose-500/10 border border-rose-500/30">
+            <p className="text-zinc-500 text-sm mb-1">健康</p>
+            <p className="font-bold text-base text-rose-400">{stats.health}/100</p>
           </div>
-          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
-            <p className="text-zinc-500 mb-0.5">福分</p>
-            <p className="font-bold text-teal-400">{stats.blessing}</p>
+          <div className="rounded-lg p-3 bg-teal-500/10 border border-teal-500/30">
+            <p className="text-zinc-500 text-sm mb-1">福分</p>
+            <p className="font-bold text-base text-teal-400">{stats.blessing}</p>
           </div>
-          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
-            <p className="text-zinc-500 mb-0.5">業力</p>
-            <p className="font-bold text-purple-400">{stats.karma}</p>
+          <div className="rounded-lg p-3 bg-purple-500/10 border border-purple-500/30">
+            <p className="text-zinc-500 text-sm mb-1">業力</p>
+            <p className="font-bold text-base text-purple-400">{stats.karma}</p>
           </div>
         </div>
 
-        <p className="text-[0.6875rem] text-zinc-500 text-center mb-4 italic">
+        <p className="text-xs text-zinc-500 text-center mb-4 italic">
           點下方四項數值卡片可查看完整明細，回顧整局的大起大落
         </p>
 

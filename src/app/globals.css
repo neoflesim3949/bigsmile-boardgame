@@ -217,11 +217,27 @@ body {
      深色底 5% amber 看得到、淺色底 5% 幾乎隱形 → 提高到 15-20% 才有對比 ── */
   .bg-amber-500\/5    { background-color: rgba(245, 158, 11, 0.15) !important; }
   .bg-amber-500\/10   { background-color: rgba(245, 158, 11, 0.20) !important; }
+  .bg-amber-500\/15   { background-color: rgba(245, 158, 11, 0.22) !important; }
   .bg-emerald-500\/5  { background-color: rgba(16, 185, 129, 0.12) !important; }
   .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.18) !important; }
+  .bg-emerald-500\/15 { background-color: rgba(16, 185, 129, 0.20) !important; }
   .bg-teal-500\/10    { background-color: rgba(20, 184, 166, 0.18) !important; }
+  .bg-teal-500\/15    { background-color: rgba(20, 184, 166, 0.20) !important; }
   .bg-teal-500\/20    { background-color: rgba(20, 184, 166, 0.20) !important; }
   .bg-rose-500\/10    { background-color: rgba(244, 63, 94, 0.15) !important; }
+  .bg-rose-500\/15    { background-color: rgba(244, 63, 94, 0.18) !important; }
+  .bg-purple-500\/10  { background-color: rgba(168, 85, 247, 0.18) !important; }
+  .bg-purple-500\/15  { background-color: rgba(168, 85, 247, 0.20) !important; }
+  .bg-sky-500\/10     { background-color: rgba(14, 165, 233, 0.18) !important; }
+  .bg-sky-500\/15     { background-color: rgba(14, 165, 233, 0.20) !important; }
+
+  /* ── 強調色邊框 /30（玩家首頁 6 格 / 揭曉彈窗用 / 命格狀態 pill）── */
+  .border-amber-500\/30  { border-color: rgba(245, 158, 11, 0.55) !important; }
+  .border-emerald-500\/30 { border-color: rgba(16, 185, 129, 0.55) !important; }
+  .border-teal-500\/30   { border-color: rgba(20, 184, 166, 0.55) !important; }
+  .border-rose-500\/30   { border-color: rgba(244, 63, 94, 0.55) !important; }
+  .border-purple-500\/30 { border-color: rgba(168, 85, 247, 0.55) !important; }
+  .border-sky-500\/30    { border-color: rgba(14, 165, 233, 0.55) !important; }
 
   /* ── 狀態 banner / toast 底色（emerald/rose/amber/sky/purple-950 系列）──
      深色底用 950 半透明（接近黑底有色暈），淺色底必須用 100 系列才看得清 ── */
@@ -311,6 +327,9 @@ body {
   .text-rose-400    { color: #e11d48 !important; } /* rose-600  */
   .text-rose-300    { color: #be123c !important; } /* rose-700  */
   .text-blue-400    { color: #2563eb !important; } /* blue-600  */
+  .text-purple-400  { color: #7e22ce !important; } /* purple-700 */
+  .text-purple-300  { color: #6b21a8 !important; } /* purple-800 */
+  .text-sky-400     { color: #0369a1 !important; } /* sky-700  */
 
   /* ── 輸入框 ── */
   input:not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-emerald"]),

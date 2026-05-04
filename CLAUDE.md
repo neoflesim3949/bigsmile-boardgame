@@ -428,7 +428,7 @@ app/
 - [ ] 漲跌只用紅綠沒加箭頭（color-blind 友善必加 ↑↓）；**flat / 持平**用 `lucide Minus` icon（`−` 形狀）會被誤認為「股價是負數」，要改成 invisible spacer 維持對齊
 - [ ] 觸控目標 < 44px
 - [ ] Scanner 沒用 dynamic import 導致 SSR 錯誤
-- [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補
+- [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補。**已補的色系**：`bg-{amber/emerald/teal/rose/purple/sky}-500/{10,15,20}`、`border-{amber/emerald/teal/rose/purple/sky}-500/30`、`text-{purple/sky}-400`
 - [ ] 看板 `/display/board` 終局結算後 toggle 「返回常規模式」無效 — 不可寫 `isFinal = forceFinal || final_scoring_triggered_at`（被 server 鎖死），要改成 `userOverride !== null ? userOverride : serverIsFinal` 讓 user 真的能切回看股市
 - [ ] 看板風雲榜 regular 模式（14% 窄欄）若用 sticky thead 會視覺脫節 → 整個 thead 不渲染，圓圈+姓名自明
 - [ ] 玩家日常頁（地獄畫面 / settings 預覽 / history 提示）`ShowAllStats=false` 時直接寫「福分」「業力」字眼 → 違反 §6.2 字眼可見範圍（必須改用「指標」「隱藏參數」籠統字眼，admin / captain 後台 / onboarding / 最終結算可見）
