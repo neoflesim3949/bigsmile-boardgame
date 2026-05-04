@@ -210,7 +210,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **快捷模組 / 倍率方案歸屬（CRITICAL）**：`QuickAction` 與 `StationSellMultiplier` 都**只綁 `station_id`，沒有 `owner_user_id`**。同一個關卡的多位關主共用同一份清單，任何被指派的關主都能完整 CRUD。後端 guard 用 `$session.userId = ANY(s.captain_user_ids)` 驗權限，**禁止**用 `WHERE owner_user_id = $captainUserId` 的舊模式。Migration 0009 移除了 QuickAction 原本的 `owner_user_id` 欄位（早期設計每位關主有私房清單，後改為協作模型）。
 - **股票加乘賣出（關主限定）**：`Station.allow_stock_sell_multiplier` 旗標（admin 在 `/admin/stations` 開關）。開啟後關主可在 `/captain/multipliers` 自管倍率方案（`StationSellMultiplier` 表，`{label, money_multiplier, blessing_penalty_multiplier, req_item_ids[], sort_order, is_active}`），掃玩家 QR 或手動輸入 ID 後在 `/captain/scan` 看到玩家持股清單，選一檔點擊 → modal 跳出股數 + 倍率選擇 → 確認賣出。**前置道具條件**：每個倍率可指定 `req_item_ids` 多個道具，**AND 語意**（玩家須同時持有所有道具），空陣列 = 無條件。前端自動 disable 玩家未具備全部道具的倍率；後端 `captainSellStockWithMultiplier` 用 CTE 重驗（`miss CTE: need LEFT JOIN have WHERE h.item_id IS NULL`），缺道具回 `MISSING_REQUIRED_ITEMS`。**計算規則**：
   - `proceeds = current_price × shares`、`profit = (current_price - avg_cost) × shares`
-  - `profit > 0` → `bonus = round(profit × (moneyMult - 1))`、`blessing_penalty = round(profit × blessingMult / 10000)`（**1K 獲利扣 0.1 福分**為基礎）
+  - `profit > 0` → `bonus = round(profit × (moneyMult - 1))`、`blessing_penalty = round(profit × blessingMult / divisor)`，**divisor 由 `AppSettings.StockSellBlessingPenaltyDivisor` 控制**（預設 10000 = 「每 1K 獲利扣 0.1 福分」=「每 10K 獲利扣 1 福分」；admin 在 `/admin/settings` 「賣股福分扣分」區可調）
   - `profit ≤ 0` → bonus=0、blessing_penalty=0（**賠錢不疊加倍率、不扣福分**）
   - 寫 `Transaction tx_type='captain_stock_sell_mult'`，actor 是關主 user_id
   - **同樣的「1K 獲利扣 0.1 福分」基礎規則也套用在玩家 `/stock` 自助 sellStock**（不是只有關主代售才扣）；profit ≤ 0 同樣不扣

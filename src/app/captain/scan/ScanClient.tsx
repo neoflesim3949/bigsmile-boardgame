@@ -29,6 +29,7 @@ interface Props {
   stations: CaptainStation[];
   allQuickActions: QuickActionRow[];
   allMultipliers: SellMultiplierRow[];
+  blessingDivisor: number;
 }
 
 const IN_PROGRESS_VERSION = 1;
@@ -54,7 +55,7 @@ interface ScannedState {
   source: 'qr' | 'manual';
 }
 
-export default function ScanClient({ captainUserId, stations, allQuickActions, allMultipliers }: Props) {
+export default function ScanClient({ captainUserId, stations, allQuickActions, allMultipliers, blessingDivisor }: Props) {
   const [stationId, setStationId] = useState(stations[0]?.id ?? '');
   const station = stations.find((s) => s.id === stationId);
   const stationQuickActions = allQuickActions.filter((qa) => qa.station_id === stationId);
@@ -550,6 +551,7 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
           holding={sellTarget}
           multipliers={stationMultipliers}
           playerItems={scanned.items}
+          blessingDivisor={blessingDivisor}
           onClose={() => setSellTarget(null)}
           onSold={async (msg) => {
             showToast(true, msg);
@@ -727,7 +729,7 @@ function fmt(n: number): string {
 }
 
 function SellWithMultiplierModal({
-  stationId, targetUserId, targetName, holding, multipliers, playerItems, onClose, onSold,
+  stationId, targetUserId, targetName, holding, multipliers, playerItems, blessingDivisor, onClose, onSold,
 }: {
   stationId: string;
   targetUserId: string;
@@ -735,6 +737,7 @@ function SellWithMultiplierModal({
   holding: CaptainPlayerHolding;
   multipliers: SellMultiplierRow[];
   playerItems: PlayerScannedItem[];
+  blessingDivisor: number;
   onClose: () => void;
   onSold: (msg: string) => void | Promise<void>;
 }) {
@@ -762,7 +765,7 @@ function SellWithMultiplierModal({
   const blessingMult = mult?.blessing_penalty_multiplier ?? 1;
   const bonus = profit > 0 ? Math.round(profit * (moneyMult - 1)) : 0;
   const totalMoney = proceeds + bonus;
-  const blessingPenalty = profit > 0 ? Math.round((profit * blessingMult) / 10000) : 0;
+  const blessingPenalty = profit > 0 ? Math.round((profit * blessingMult) / blessingDivisor) : 0;
   const selectedUnmet = mult ? unmetItemNames(mult.req_item_ids) : [];
 
   function handleConfirm() {

@@ -116,6 +116,12 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
           </div>
         </section>
 
+        {/* 賣股福分扣分 */}
+        <SellBlessingPenaltySection
+          divisor={settings.StockSellBlessingPenaltyDivisor ?? '10000'}
+          onChange={(v) => setField('StockSellBlessingPenaltyDivisor', v)}
+        />
+
         {/* Row 2: 預設新手初始值 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5">
           <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">預設新手初始值</h3>
@@ -407,6 +413,46 @@ function NumField({
         className={`w-full bg-zinc-900 border border-zinc-700 rounded-lg p-2.5 text-zinc-200 focus:ring-1 ${c.ring}`}
       />
     </div>
+  );
+}
+
+function SellBlessingPenaltySection({
+  divisor, onChange,
+}: { divisor: string; onChange: (v: string) => void }) {
+  const num = Math.max(1, Number(divisor) || 10000);
+  // 換算說明：每多少獲利扣 1 福分 / 每 1K 獲利扣多少福分
+  const per1k = (1000 / num).toFixed(num >= 10000 ? 2 : 1);
+  const profit5k = Math.round(5000 / num);
+  const profit10k = Math.round(10000 / num);
+  const profit50k = Math.round(50000 / num);
+  return (
+    <section className="glass-panel p-6 rounded-2xl space-y-4">
+      <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">賣股福分扣分</h3>
+      <p className="text-xs text-zinc-500">公式：<code className="text-amber-400">blessing_penalty = round(profit / divisor)</code>；賠錢時不扣。同時影響玩家自助賣出與關主代售（倍率為 ×1 時）。</p>
+      <div className="flex items-center gap-3">
+        <label className="text-sm text-zinc-300">每</label>
+        <input
+          type="number"
+          min="1"
+          step="100"
+          value={divisor}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-32 bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-center font-mono"
+        />
+        <span className="text-sm text-zinc-300">獲利扣 1 福分</span>
+      </div>
+      <div className="bg-zinc-900/50 rounded-lg border border-zinc-800 p-3 text-xs grid grid-cols-2 gap-x-4 gap-y-1">
+        <div className="text-zinc-500">每 1K 獲利</div>
+        <div className="text-teal-400 font-mono">扣 {per1k} 福分</div>
+        <div className="text-zinc-500">5K profit</div>
+        <div className="text-teal-400 font-mono">扣 {profit5k} 福分</div>
+        <div className="text-zinc-500">10K profit</div>
+        <div className="text-teal-400 font-mono">扣 {profit10k} 福分</div>
+        <div className="text-zinc-500">50K profit</div>
+        <div className="text-teal-400 font-mono">扣 {profit50k} 福分</div>
+      </div>
+      <p className="text-[0.6875rem] text-zinc-500 italic">記得按右上「儲存變更」</p>
+    </section>
   );
 }
 

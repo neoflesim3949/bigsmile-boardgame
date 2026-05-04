@@ -977,13 +977,15 @@ export async function captainSellStockWithMultiplier(
 
       const proceeds = stock.current_price * data.shares;
       const profit = (stock.current_price - me.avg_cost) * data.shares;
-      // 倍率規則（與圖表一致）：
-      //   profit > 0 → bonus = profit × (moneyMult - 1)、blessing_penalty = ROUND(profit × blessingMult / 10000)
+      // 倍率規則（與圖表一致；divisor 由 AppSettings.StockSellBlessingPenaltyDivisor 控制）：
+      //   profit > 0 → bonus = profit × (moneyMult - 1)、blessing_penalty = ROUND(profit × blessingMult / divisor)
       //   profit ≤ 0 → bonus = 0、blessing_penalty = 0（賠錢不扣福分）
+      const divisorStr = await getSetting('StockSellBlessingPenaltyDivisor');
+      const divisor = Math.max(1, Number(divisorStr) || 10000);
       const bonus = profit > 0 ? Math.round(profit * (mult.money_multiplier - 1)) : 0;
       const totalMoneyGain = proceeds + bonus;
       const blessingPenalty = profit > 0
-        ? Math.round((profit * mult.blessing_penalty_multiplier) / 10000)
+        ? Math.round((profit * mult.blessing_penalty_multiplier) / divisor)
         : 0;
 
       const newR = await client.query<{ money: number; blessing: number }>(

@@ -36,6 +36,7 @@ export type AppSettingsKey =
   | 'BoardMarqueeMaxMinutes'
   | 'RoundIntervalMinutes'
   | 'StockPriceRule'
+  | 'StockSellBlessingPenaltyDivisor'
   | 'MaxDestinyDraws';
 
 export const DEFAULT_SETTINGS: Record<AppSettingsKey, string> = {
@@ -69,6 +70,9 @@ export const DEFAULT_SETTINGS: Record<AppSettingsKey, string> = {
   BoardMarqueeMaxMinutes: '120',
   RoundIntervalMinutes: '10',
   StockPriceRule: '{}',
+  // 賣股獲利每 N 元扣 1 福分（formula: blessing_penalty = round(profit / divisor)）
+  // 預設 10000 = 「每 1K 獲利扣 0.1 福分」=「每 10K 獲利扣 1 福分」
+  StockSellBlessingPenaltyDivisor: '10000',
   MaxDestinyDraws: '100',
 };
 

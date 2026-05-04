@@ -104,9 +104,26 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
       return `${where}關主代售 ${left} ×${shares} ${tag} ${totalStr}${bonusStr}`.trim();
     }
     case 'transfer': {
-      const counterparty = s(payload.counterparty_name) ?? s(payload.to_user_name) ?? s(payload.from_user_name);
-      const direction = payload.direction === 'out' ? '轉出至' : payload.direction === 'in' ? '收到自' : '轉帳';
-      return counterparty ? `${direction} ${counterparty}` : null;
+      const counterparty = s(payload.counterparty_name);
+      const amount = n(payload.amount);
+      const fee = n(payload.fee);
+      const note = s(payload.note);
+      const noteStr = note ? `（${note}）` : '';
+      const amtStr = amount != null ? ` $${amount.toLocaleString()}` : '';
+      const feeStr = fee != null && fee > 0 ? `（手續費 $${fee.toLocaleString()}）` : '';
+      if (payload.direction === 'out') {
+        return counterparty
+          ? `轉出${amtStr} 給 ${counterparty}${feeStr}${noteStr}`
+          : `轉出${amtStr}${feeStr}${noteStr}`;
+      }
+      if (payload.direction === 'in') {
+        return counterparty
+          ? `收到 ${counterparty} 轉入${amtStr}${noteStr}`
+          : `收到轉入${amtStr}${noteStr}`;
+      }
+      // 舊版 row（沒寫 direction）→ 顯示原始 to user_id（盡力而為）
+      const oldTo = s(payload.to);
+      return oldTo ? `轉帳（→ ${oldTo}）` : null;
     }
     case 'forced_liquidation': {
       const event = s(payload.event_text) || '系統事件';

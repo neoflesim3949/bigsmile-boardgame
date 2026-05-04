@@ -13,11 +13,12 @@ import {
 interface ItemLite { id: string; name: string; icon: string }
 
 export default function MultipliersClient({
-  stations, initialMultipliers, items,
+  stations, initialMultipliers, items, blessingDivisor,
 }: {
   stations: CaptainStation[];
   initialMultipliers: SellMultiplierRow[];
   items: ItemLite[];
+  blessingDivisor: number;
 }) {
   const [mults, setMults] = useState<SellMultiplierRow[]>(initialMultipliers);
   const [editing, setEditing] = useState<{ stationId: string; row: SellMultiplierRow | null } | null>(null);
@@ -148,6 +149,7 @@ export default function MultipliersClient({
           stationId={editing.stationId}
           target={editing.row}
           items={items}
+          blessingDivisor={blessingDivisor}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
             setMults((arr) => {
@@ -176,11 +178,12 @@ export default function MultipliersClient({
 }
 
 function MultiplierModal({
-  stationId, target, items, onClose, onSaved,
+  stationId, target, items, blessingDivisor, onClose, onSaved,
 }: {
   stationId: string;
   target: SellMultiplierRow | null;
   items: ItemLite[];
+  blessingDivisor: number;
   onClose: () => void;
   onSaved: (m: SellMultiplierRow) => void;
 }) {
@@ -215,12 +218,12 @@ function MultiplierModal({
     });
   }
 
-  // 預覽：1 萬獲利時的影響
+  // 預覽：1 萬獲利時的影響（divisor 來自 AppSettings.StockSellBlessingPenaltyDivisor）
   const profit = 10000;
   const moneyMultNum = Number(moneyMult) || 0;
   const blessingMultNum = Number(blessingMult) || 0;
   const bonusPreview = Math.round(profit * (moneyMultNum - 1));
-  const blessingPenaltyPreview = Math.round((profit * blessingMultNum) / 10000);
+  const blessingPenaltyPreview = Math.round((profit * blessingMultNum) / blessingDivisor);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4">

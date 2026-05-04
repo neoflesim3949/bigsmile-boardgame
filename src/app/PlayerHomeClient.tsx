@@ -81,10 +81,21 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   return (
     <div className="min-h-screen page-bg p-4 pb-20">
       <header className="flex justify-between items-center mb-6 pl-2 pr-2 mt-2">
-        <div>
-          <h1 className="text-2xl font-bold text-amber-500">{stats.name}</h1>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <h1 className="text-2xl font-bold text-amber-500 truncate">{stats.name}</h1>
+            {stats.destiny_name && (
+              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap">
+                {stats.destiny_name}
+              </span>
+            )}
+            {stats.show_all_stats && stats.karma_band_label && (
+              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border whitespace-nowrap ${karmaBandStyle(stats.karma)}`}>
+                {stats.karma_band_label}
+              </span>
+            )}
+          </div>
           <p className="text-zinc-500 text-sm">{stats.user_id}</p>
-          {stats.destiny_name && <p className="text-xs text-zinc-500 mt-0.5">命格：{stats.destiny_name}</p>}
         </div>
         <div className="flex items-center gap-2">
           <QrButton name={stats.name} userId={stats.user_id} />
@@ -269,4 +280,20 @@ function UserIcon() {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
     </svg>
   );
+}
+
+/**
+ * 依當前 karma 值給 KarmaBand badge 配色（不依賴 admin 自訂的 label，所以 admin 重新命名也能套到合理顏色）
+ * - karma ≤ -100：emerald（光明傾向）
+ * - -99 ~ 99：zinc（中性）
+ * - 100 ~ 199：amber（警戒）
+ * - 200 ~ 299：orange（嚴重）
+ * - ≥ 300：rose（最墮落）
+ */
+function karmaBandStyle(karma: number): string {
+  if (karma <= -100) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+  if (karma >= 300) return 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+  if (karma >= 200) return 'bg-orange-500/15 text-orange-400 border-orange-500/30';
+  if (karma >= 100) return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+  return 'bg-zinc-700/40 text-zinc-300 border-zinc-600/40';
 }

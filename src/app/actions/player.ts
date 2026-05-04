@@ -224,6 +224,8 @@ export interface PlayerStatsView {
   user_id: string;
   name: string;
   destiny_name: string | null;
+  /** 當前對應的 KarmaBand label（依 karma 落點 LATERAL join；無對應 band 為 null） */
+  karma_band_label: string | null;
   money: number;
   health: number;
   blessing: number;
@@ -283,10 +285,21 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
       money: number; health: number; blessing: number; karma: number;
       rebirth_count: number; bank_loan: number; destiny_name: string | null;
       last_manual_refresh_at: string | null;
+      karma_band_label: string | null;
     }>(
-      `SELECT money, health, blessing, karma, rebirth_count, bank_loan,
-              destiny_name, last_manual_refresh_at
-       FROM "PlayerStats" WHERE user_id = $1`,
+      `SELECT ps.money, ps.health, ps.blessing, ps.karma, ps.rebirth_count, ps.bank_loan,
+              ps.destiny_name, ps.last_manual_refresh_at,
+              kb.label AS karma_band_label
+       FROM "PlayerStats" ps
+       LEFT JOIN LATERAL (
+         SELECT label
+         FROM "KarmaBand"
+         WHERE is_active = true
+           AND (karma_min IS NULL OR ps.karma >= karma_min)
+           AND (karma_max IS NULL OR ps.karma <= karma_max)
+         ORDER BY sort_order ASC LIMIT 1
+       ) kb ON true
+       WHERE ps.user_id = $1`,
       [session.userId],
     );
     const stats = r.rows[0];
@@ -311,6 +324,7 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
         user_id: session.userId,
         name: session.name,
         destiny_name: stats.destiny_name,
+        karma_band_label: stats.karma_band_label,
         money: stats.money,
         health: stats.health,
         blessing: stats.blessing,
@@ -393,18 +407,32 @@ export async function transferMoney(payload: z.infer<typeof transferSchema>): Pr
         [data.toUserId, data.amount],
       );
 
-      const payload_json = JSON.stringify({
-        from: session.userId,
-        to: data.toUserId,
+      // 兩筆 Transaction 各自寫「自己視角」的 payload（direction + counterparty 名）
+      // 這樣歷史明細才能正確顯示「轉出 / 收到自 + 對方名 + 金額」與正負 delta
+      const senderName = session.name;
+      const receiverName = target.rows[0].name;
+      const note = data.note ?? '';
+      const senderPayload = JSON.stringify({
+        direction: 'out',
+        counterparty_user_id: data.toUserId,
+        counterparty_name: receiverName,
         amount: data.amount,
         fee,
-        note: data.note ?? '',
+        note,
+      });
+      const receiverPayload = JSON.stringify({
+        direction: 'in',
+        counterparty_user_id: session.userId,
+        counterparty_name: senderName,
+        amount: data.amount,
+        fee: 0,  // 收款方不付手續費
+        note,
       });
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
          VALUES ($1, $1, 'transfer', $2),
-                ($3, $1, 'transfer', $2)`,
-        [session.userId, payload_json, data.toUserId],
+                ($3, $1, 'transfer', $4)`,
+        [session.userId, senderPayload, data.toUserId, receiverPayload],
       );
       return updMe.rows[0].money;
     });
@@ -927,15 +955,18 @@ function extractDelta(txType: string, payload: Record<string, unknown>, type: Hi
   }
   if (txType === 'transfer') {
     if (type !== 'money') return 0;
-    const from = payload['from'];
+    const direction = payload['direction'];
     const amt = payload['amount'];
     const fee = payload['fee'];
     if (typeof amt !== 'number') return null;
-    // 收款 / 出款判斷：若我是 from → -amount-fee；若是 to → +amount
-    // payload 同時寫進兩筆 Transaction，所以這裡不知道哪筆是哪個玩家。
-    // 簡化：以 from 是否等於本筆 user_id 推不出（要看上層 user_id），
-    // 故回傳 null 讓 UI 顯示 ±不確定。實作時上層可再用 user_id 比對。
-    void from; void fee;
+    if (direction === 'out') {
+      const f = typeof fee === 'number' ? fee : 0;
+      return -(amt + f);
+    }
+    if (direction === 'in') {
+      return amt;
+    }
+    // 舊版 row（沒寫 direction）→ 推不出方向，回 null 顯示空白
     return null;
   }
   if (txType === 'exchange') {

@@ -209,7 +209,7 @@
 > **觸發時機**：關主在 `/captain/scan` 對玩家持股執行 `captainSellStockWithMultiplier` 時動態取用。每個關卡可有多個倍率方案；關主在 `/captain/multipliers` 自管。`Station.allow_stock_sell_multiplier` 為旗標開關（admin 在 `/admin/stations` 控制），未開啟的站不顯示倍率管理頁也不顯示掃描結果中的持股清單。
 
 > **計算規則**（同 V2 §7.1.1）：
-> - `profit > 0`：`bonus = ROUND(profit × (money_multiplier - 1))`、`blessing_penalty = ROUND(profit × blessing_penalty_multiplier / 10000)`
+> - `profit > 0`：`bonus = ROUND(profit × (money_multiplier - 1))`、`blessing_penalty = ROUND(profit × blessing_penalty_multiplier / divisor)`，**divisor 從 `AppSettings.StockSellBlessingPenaltyDivisor` 取（預設 10000）**，admin 可在 `/admin/settings` 「賣股福分扣分」區調整
 > - `profit ≤ 0`：bonus=0、blessing_penalty=0（賠錢時不扣福分、不疊加倍率）
 > - **同樣的基礎扣分規則套用在玩家自助 `sellStock`**（V2 §7.1.1 表）
 

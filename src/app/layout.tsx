@@ -6,7 +6,7 @@ import ThemeProvider from '@/components/ThemeProvider';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: '開運大富翁',
+  title: '開運大富翁-玩家',
   description: '開運大富翁 - 獨立部署的活動小遊戲',
 };
 

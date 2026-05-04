@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { query, withTx } from '@/lib/db';
 import { assertNotDuringFinalScoring, assertNotTourMode, assertPlayerAlive, requireRole } from '@/lib/auth';
+import { getSetting } from '@/lib/settings';
 
 export interface StockMarketRow {
   id: string;
@@ -234,8 +235,11 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
 
       const proceeds = price * data.shares;
       const profit = (price - me.avg_cost) * data.shares;
-      // 基礎福分扣分規則：每 1000 獲利扣 0.1 福分（ROUND；賠錢不扣）
-      const blessingPenalty = profit > 0 ? Math.round(profit / 10000) : 0;
+      // 基礎福分扣分規則：blessing_penalty = round(profit / divisor)；賠錢不扣
+      // divisor 由 AppSettings.StockSellBlessingPenaltyDivisor 控制（預設 10000 = 每 10K 獲利扣 1 福分）
+      const divisorStr = await getSetting('StockSellBlessingPenaltyDivisor');
+      const divisor = Math.max(1, Number(divisorStr) || 10000);
+      const blessingPenalty = profit > 0 ? Math.round(profit / divisor) : 0;
 
       const newMoneyR = await client.query<{ money: number; blessing: number }>(
         `UPDATE "PlayerStats"

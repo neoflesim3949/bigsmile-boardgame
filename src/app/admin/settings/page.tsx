@@ -22,6 +22,7 @@ export default async function SettingsPage() {
     'RebirthKarma',
     'ExchangeRate',
     'ManualRefreshCooldownSeconds',
+    'StockSellBlessingPenaltyDivisor',
     'BankLoanCapacityRatio',
     'BankInterestIntervalMinutes',
     'BankInterestBlessingAmount',

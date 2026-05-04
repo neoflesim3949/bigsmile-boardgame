@@ -316,9 +316,11 @@
 
 **所有賣出**（玩家自助 + 關主代售加乘）都套同一基礎扣分公式：
 
-> **每 1,000 獲利扣 0.1 福分**（ROUND；賠錢時不扣）
+> **每 N 獲利扣 1 福分**（divisor = N；ROUND；賠錢時不扣）
 
-數學：`blessing_penalty = profit > 0 ? ROUND(profit × blessing_mult / 10000) : 0`
+預設 N = 10,000（即「每 1K 獲利扣 0.1 福分」=「每 10K 獲利扣 1 福分」）。**admin 在 `/admin/settings` 「賣股福分扣分」區可改 divisor**（key = `StockSellBlessingPenaltyDivisor`），即時生效。
+
+數學：`blessing_penalty = profit > 0 ? ROUND(profit × blessing_mult / divisor) : 0`
 
 | 情境 | profit | 倍率（金錢/福分扣） | 入帳金錢 | 福分扣除 |
 |------|--------|-----------------|----------|---------|
