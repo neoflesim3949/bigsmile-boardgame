@@ -107,24 +107,12 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
         const pool = candidates.length > 0 ? candidates : templates.rows;
         chosen = pool[Math.floor(Math.random() * pool.length)];
       } else {
-        // 防呆：無範本時 fallback AppSettings + 預設視覺
-        const fallback = await getSettings([
-          'InitialMoney',
-          'InitialHealth',
-          'InitialBlessing',
-          'InitialKarma',
-        ]);
-        chosen = {
-          label: '預設命格',
-          emoji: '🀄',
-          description: '無命格範本，套用系統預設值。',
-          theme: 'zinc',
-          rarity_label: '普通',
-          money: Number(fallback.InitialMoney) || 0,
-          health: Number(fallback.InitialHealth) || 0,
-          blessing: Number(fallback.InitialBlessing) || 0,
-          karma: Number(fallback.InitialKarma) || 0,
-        };
+        // 規格：每位玩家都必須抽命格；admin 必須建立至少一個 active 命格範本
+        // 早期版本曾用 AppSettings.Initial* 做 fallback，已移除（見 0013 migration / CLAUDE.md §1）
+        throw new ActionError(
+          'CONFLICT',
+          '系統未啟用任何命格範本，無法抽卡。請聯絡大會管理員至 /admin/settings 建立並啟用至少一個命格範本。',
+        );
       }
 
       // upsert PlayerStats（idempotency：WHERE destiny_name IS NULL）

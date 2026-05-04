@@ -18,10 +18,6 @@ export type AppSettingsKey =
   | 'ScoreWeightMoney'
   | 'ScoreWeightBlessing'
   | 'ScoreWeightKarma'
-  | 'InitialMoney'
-  | 'InitialHealth'
-  | 'InitialBlessing'
-  | 'InitialKarma'
   | 'RebirthMoney'
   | 'RebirthHealth'
   | 'RebirthBlessing'
@@ -52,10 +48,6 @@ export const DEFAULT_SETTINGS: Record<AppSettingsKey, string> = {
   ScoreWeightMoney: '0.05',
   ScoreWeightBlessing: '200',
   ScoreWeightKarma: '150',
-  InitialMoney: '1000',
-  InitialHealth: '80',
-  InitialBlessing: '10',
-  InitialKarma: '0',
   RebirthMoney: '500',
   RebirthHealth: '50',
   RebirthBlessing: '5',

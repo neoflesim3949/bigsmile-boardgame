@@ -131,19 +131,7 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
           onChange={(v) => setField('StockSellBlessingPenaltyDivisor', v)}
         />
 
-        {/* Row 2: 預設新手初始值 */}
-        <section className="glass-panel p-6 rounded-2xl space-y-5">
-          <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">預設新手初始值</h3>
-          <p className="text-xs text-zinc-500 mb-4">當沒有指定範本時使用的預設數值。</p>
-          <div className="grid grid-cols-2 gap-4">
-            <NumField label="初始金錢" color="amber" value={settings.InitialMoney ?? '5000'} onChange={(v) => setField('InitialMoney', v)} />
-            <NumField label="初始健康" color="rose" value={settings.InitialHealth ?? '100'} onChange={(v) => setField('InitialHealth', v)} />
-            <NumField label="初始福分" color="teal" value={settings.InitialBlessing ?? '10'} onChange={(v) => setField('InitialBlessing', v)} />
-            <NumField label="初始業力" color="purple" value={settings.InitialKarma ?? '0'} onChange={(v) => setField('InitialKarma', v)} />
-          </div>
-        </section>
-
-        {/* Row 2: 重生參數 */}
+        {/* Row 2: 重生後初始值（每個玩家都必須抽命格，不再保留新手初始值 fallback） */}
         <section className="glass-panel p-6 rounded-2xl space-y-5">
           <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">重生後初始值</h3>
           <p className="text-xs text-zinc-500 mb-4">玩家在特定關卡執行重生操作後，將被賦予這些數值。</p>

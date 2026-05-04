@@ -77,7 +77,7 @@
 > 「重置股價歷史 / 重置使用次數 / 重置會員明細 / 刪除所有會員 / 刪除所有股票」等不可復原操作，**統一在 `/admin/settings` 的危險操作區**（每個按鈕需 3 次確認），不放在 dashboard 以避免誤觸。
 
 ### 3.2 參數設定 (`/admin/settings`)
-設定系統全域參數，**7 個 section**：
+設定系統全域參數，**7 個 section**（數值顯示 / 最終計分權重 / 賣股福分扣分 / 重生後初始值 / 命格範本池 / 業力影響 / 危險操作區）：
 - **數值顯示設定**：`ShowAllStats` toggle，控制玩家端是否顯示福分／業力（健康／金錢始終可見）。
 - **最終計分權重**：最終結算公式的佔比 (`ScoreWeightMoney`, `ScoreWeightBlessing`, `ScoreWeightKarma`)。
 - **新手命格範本 (抽卡池)**：可建立多套版本（例如：富貴命、清修命）。玩家的資料表會有一欄 `destiny_name` 紀錄其命格。
@@ -91,8 +91,7 @@
     - **滾動 cycle**：抽完 N 人後系統不擋玩家，第 N+1 人開始第二輪 cycle 同比例分配（永不擋人）
     - 演算法：`cycle = floor(total_drawn / MaxDestinyDraws)` → 各範本有效 quota = `(cycle+1) × quota` → 候選 = `已抽 < 有效 quota` 的範本 → 候選為空 fallback 從所有 active 範本均勻抽
     - **抽卡頁面顯示**：揭露命格時保留福分 / 業力欄位但**數值固定「???」**（不論哪種命格），避免一開始洩漏；金錢與健康正常顯示
-- **預設新手初始值**：當系統內沒有任何命格範本被啟用時的「防呆備案」，系統將回退使用這組單一預設參數 (`InitialMoney`, `InitialHealth`, `InitialBlessing`, `InitialKarma`) 給新玩家。
-- **重生後初始值**：玩家遭關主執行「重生」後的四項初始值 (`RebirthMoney`, `RebirthHealth`, `RebirthBlessing`, `RebirthKarma`)。與新手初始值**分開管理**。
+- **重生後初始值**：玩家遭關主執行「重生」後的四項初始值 (`RebirthMoney`, `RebirthHealth`, `RebirthBlessing`, `RebirthKarma`)。**規格：每位玩家都必須抽命格**，不再有「無命格範本 fallback」路徑（migration 0013 移除 `Initial*` keys）；admin 必須建立至少一個 active 命格範本，否則 `drawDestiny` 直接回 `CONFLICT`。
 - **業力影響（KarmaBand）**：依玩家**當下業力區間**對應到一組「狀態」，每次推進回合時自動套用四項值變動（金錢／健康／福分／業力）。
   - 欄位：狀態名稱 `label`、`karma_min` / `karma_max`（皆允許空值表示不設下／上限）、四項 delta、`sort_order`（重疊區段以小者優先）、啟用 toggle。
   - **僅在推進回合當下計算**：不依分鐘、不依工作類型；推進時對所有「健康 > 0 且 福分 > 0」的玩家依當下 `karma` 取對應 band 套用 delta，地獄狀態玩家不受影響。
@@ -383,27 +382,30 @@
 #### 畫面佈局與切換機制
 
 **1. 常規模式（遊戲進行中）**：
-採三欄式佈局設計（56 / 32 / 12）：
-- **重點趨勢區**（左 56%）：包在外框 glass-panel 內。內部 `grid-cols-3 grid-rows-2` **最多 6 檔** featured 商品。每張卡片含 canvas sparkline + 漲跌百分比 + 當前價。後台 `BoardConfig.featured_stock_ids` 可設多個（陣列），看板按陣列前 6 個顯示。
-- **行情總表**（中 32%）：顯示所有 `is_visible === true` 的股市商品（代碼、名稱、當前價格、漲跌幅 % + 箭頭）。
-- **風雲榜**（右 12%）：窄欄只放 rank + 姓名。每回合 `tickRound` 後 `BoardConfig.last_tick_at` 變動 → fallback poll 拿到新值。常規模式只顯示前 10 名「排名 + 玩家姓名」（**不顯示金額/分數**保持神祕感）。Rank 1-3 加金 / 銀 / 銅獎牌。
+採兩欄式佈局：
+- **重點趨勢區**（flex 約 54%）：包在外框 glass-panel 內。內部 `grid-cols-3 grid-rows-2` **最多 6 檔** featured 商品。每張卡片含 canvas sparkline + 漲跌百分比 + 當前價。後台 `BoardConfig.featured_stock_ids` 可設多個（陣列），看板按陣列前 6 個顯示。
+- **行情總表**（flex 約 46%）：顯示所有 `is_visible === true` 的股市商品（代碼、名稱、當前價格、漲跌幅 % + 箭頭）。
+- **風雲榜 panel 完全隱藏**：活動進行中不公開即時排行（避免玩家偏離劇情，CLAUDE.md §9 設計取捨）。
 
 **2. 最終結算模式（遊戲結束後）**：
 - 當後台（管理員）觸發「最終結算」後，看板畫面會瞬間切換進入霸氣的霸榜模式。
 - **隱藏所有股票資訊**：重點趨勢區與大會行情總表將完全退場隱藏。
-- **展開全屏排行榜**：大富翁風雲榜會延展至 100% 滿版，並**解鎖顯示所有後台欄位**（包含：排名、姓名、金錢、福份、健康、業力、重生次數、綜合最終分數）。
+- **展開全屏排行榜**：大富翁風雲榜會延展至 100% 滿版，並**解鎖顯示所有後台欄位**（**10 欄**：排名、姓名、**命格**、**狀態**、金錢、福份、健康、業力、重生次數、綜合最終分數）。
+- **命格 / 狀態 pill badge**：依 admin 設定的 `InitialValueTemplate.theme` / `KarmaBand.theme` 套色（amber / teal / purple / rose / sky / zinc 共 6 色），與玩家首頁卡片同色系。
 - **手動滾動檢視**：畫面預設顯示前 10 名，由現場操作員透過滑鼠或觸控版**手動向下滾動**，以揭曉後續名次（不採用自動跑馬燈）。
-- 支援與後台相同的**欄位點擊排序**功能，讓大會主持人可以引導現場玩家觀看各項細部數據的排行榜。
+- 支援與後台相同的**欄位點擊排序**功能（金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數，6 個可排序欄位），讓大會主持人可以引導現場玩家觀看各項細部數據的排行榜。
 - **名次固定原則**：畫面上的「排名」數字永遠綁定於玩家的「綜合最終分數」，當點擊其他欄位（例如：金錢）進行排序時，雖然資料列上下順序會變，但玩家身上背著的「排名數字」絕對不會改變。
 
-**模式切換 toggle（CRITICAL）**：右上角「展開最終榜單 / 返回常規模式」按鈕用 `userOverride: boolean | null` state，**已計分後仍可切回常規看股市**（不會被 server final_scoring 鎖死）：
-- `null`（預設）：跟 server 狀態 `final_scoring_triggered_at`
-- `true / false`：user 主動 toggle 鎖定，不再被 server 蓋過
-- 公式：`isFinal = userOverride !== null ? userOverride : serverIsFinal`
+**模式切換 toggle（CRITICAL）**：
+- 右上角「展開最終榜單 / 返回常規模式」按鈕**僅在 `serverIsFinal === true`（admin 已觸發終局結算）才顯示**；活動進行中不允許 preview 終局模式（避免被觀眾看到）
+- 按鈕顯示後用 `userOverride: boolean | null` state，**已計分後仍可切回常規看股市**（不會被 server final_scoring 鎖死）：
+  - `null`（預設）：跟 server 狀態 `final_scoring_triggered_at`
+  - `true / false`：user 主動 toggle 鎖定，不再被 server 蓋過
+  - 公式：`isFinal = userOverride !== null ? userOverride : serverIsFinal`
 
 **風雲榜表頭設計**：
-- 常規模式（14% 窄欄）：整個 `<thead>` **不渲染**（圓圈獎牌 + 姓名自明，sticky thead 在窄欄會視覺脫節）
-- 最終模式（全寬 8 欄）：保留 sticky thead 給排序按鈕用
+- 常規模式：整個 panel 隱藏（無表頭問題）
+- 最終模式（全寬 10 欄）：保留 sticky thead 給排序按鈕用
 
 > **不顯示換匯所匯率**：匯率屬於玩家視野不可見的隱藏參數，不應在公開看板曝露。
 

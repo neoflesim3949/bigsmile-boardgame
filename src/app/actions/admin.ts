@@ -1319,6 +1319,26 @@ export async function revokeDisplayToken(jti: string): Promise<ActionResult<null
   }
 }
 
+/** 刪除 token 紀錄（僅允許已撤銷或已過期的 token，避免誤刪有效 token）*/
+export async function deleteDisplayToken(jti: string): Promise<ActionResult<null>> {
+  try {
+    await requireRole('admin');
+    const r = await query(
+      `DELETE FROM "DisplayToken"
+       WHERE jti = $1
+         AND (revoked_at IS NOT NULL OR expires_at < now())`,
+      [jti],
+    );
+    if ((r.rowCount ?? 0) === 0) {
+      throw new ActionError('FORBIDDEN', '只能刪除已撤銷或已過期的 token');
+    }
+    revalidatePath('/admin/events');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 export interface DisplayTokenRow {
   jti: string;
   label: string;
@@ -1644,13 +1664,13 @@ export async function restartGameCycle(): Promise<ActionResult<{ reset_at: strin
       await client.query(`DELETE FROM "Transaction" WHERE tx_type = 'round_tick'`);
       // 6. BoardConfig 場次狀態
       const upd = await client.query<{ updated_at: string }>(
+        // featured_stock_ids 不重置 — 保留 admin 設好的看板曲線商品（場次間設定不變）
         `UPDATE "BoardConfig"
          SET final_scoring_triggered_at = NULL,
              current_round = 0,
              last_tick_at = NULL,
              marquee_text = '',
              marquee_until = NULL,
-             featured_stock_ids = '{}',
              updated_at = now()
          WHERE id = 1
          RETURNING updated_at`,

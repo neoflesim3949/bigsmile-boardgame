@@ -162,14 +162,13 @@ assertPlayerAlive(stats)   // ← 統一 guard
 
 ### 參數設定頁（`/admin/settings`）
 
-後台路由 `/admin/settings` 提供 **6 個 section** 的參數設定頁面：
+後台路由 `/admin/settings` 提供 **7 個 section** 的參數設定頁面（數值顯示 / 最終計分權重 / 賣股福分扣分 / 重生後初始值 / 命格範本池 / 業力影響 / 危險操作區）：
 
 | 區塊 | 涵蓋的內容 |
 |------|------------|
 | 數值顯示設定 | `ShowAllStats`（單一 toggle，控制玩家是否看見福分／業力。健康／金錢始終可見） |
 | 最終計分權重 | `ScoreWeightMoney`（建議 0.05）、`ScoreWeightBlessing`（建議 200）、`ScoreWeightKarma`（建議 150，扣除）；公式：`金錢×W_m + 福分×W_b − 業力×W_k`，健康不參與計分 |
-| 預設新手初始值 | `InitialMoney`、`InitialHealth`、`InitialBlessing`、`InitialKarma`（命格範本不可用時的 fallback） |
-| 重生後初始值 | `RebirthMoney`、`RebirthHealth`（最高 100）、`RebirthBlessing`、`RebirthKarma`（與新玩家初始值**分開管理**） |
+| 重生後初始值 | `RebirthMoney`、`RebirthHealth`（最高 100）、`RebirthBlessing`、`RebirthKarma`（玩家被關主執行重生後的初始值；不再有「新手 fallback」一律走命格抽卡）|
 | 新手命格範本池 | `InitialValueTemplate` 表 CRUD（多個範本，啟用中隨機抽取） |
 | 危險操作區（Danger Zone） | 5 個按鈕（重置會員明細 / 刪除所有會員 / 重置股價歷史 / 刪除所有股票 / 重置使用次數），**每個按鈕需經過 3 次確認彈窗才會執行**。**「重置會員明細」**：清空玩家四項數值 / 命格 / 持股 / 借貸 / 道具 + **玩家四項值的 Transaction 明細**（`DELETE WHERE user_id IN (player accounts)`），保留 Account |
 
@@ -177,7 +176,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **活動時間 / 遊戲狀態旗標**（`BoardGameEnabled` / `CardDrawMode` / `TourMode`）→ 在 `/admin` 總覽面板的工具列
 - **換匯倍率**（`ExchangeRateMultiplier`）→ 在 `/admin` 總覽面板的「換匯所即時權重控制」
 - **換匯方案 / 銀行借貸方案**（`ExchangeOption` / `BankLoanOption`）→ 在 `/admin/finance`
-- **看板版型 / 跑馬燈 / display token** → 在 `/admin/events`
+- **看板版型 / 跑馬燈 / display token** → 在 `/admin/events`（兩列佈局：劇情事件排程全寬 + 看板畫面設定 ｜ Display Token 並排；Token 撤銷或過期後可進一步「刪除紀錄」`deleteDisplayToken`）
 
 最終計分由管理員按 `/admin` 工具列的「遊戲結束(計分)」觸發（`triggerFinalScoring`），結果推送至看板與玩家端。
 
@@ -226,8 +225,11 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **即時跑馬燈廣播**：textarea + 發送 / 清除 → `publishMarquee` / `clearMarquee`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
 - **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上。**「自訂」用內建 modal**（不要用 `window.prompt` — mobile Safari / 部分桌面 Chrome 會靜默擋）。**前後端必須同時套用倍率且公式一致**：`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用 `effective_per_unit = round(money_gain_per_unit × mult)`、`total = effective_per_unit × units`（先 round 再乘，避免「顯示 +200、實際 +199」的 rounding 爭議）。**禁止**只在後端套倍率不在前端 list 套，否則玩家看到的「將獲得」與實際入帳會不一致
 
-**C. 排行榜（前 50 名）**
-即時依 `ScoreWeight*` 計算 `final_score = money×W_m + blessing×W_b − karma×W_k`。**計算在 JS 端做**（避免 PG 對 `int * float-text-param` 的 cast 推導失敗）。
+**C. 風雲榜**（前身為「財富排行榜」）
+- `final_score` **預存於 `PlayerStats.final_score`**（migration 0012），每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 由 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore` 自動重算。SQL 內以 `::float` cast 讀 AppSettings 算分（避免 PG 對 `int * float-text-param` 的 cast 推導失敗）。
+- 公式：`final_score = ROUND(money × W_m + blessing × W_b − karma × W_k)`
+- Admin 端 leaderboard 撈全部 active player（**不下 LIMIT**，依 `final_score DESC`）→ 前端分頁（**預設 20 / 可切 50 / 100**）+ 6 欄可點排序（金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數）+ 命格 / 狀態 兩欄 pill badge 依 theme 套色
+- **rank 永遠依 `final_score` DESC 固定，不隨當前排序欄位變化**（V2 §8 名次固定原則）— 玩家身上的 rank 數字不論點哪個欄位排序都不會變
 
 ---
 
@@ -285,7 +287,7 @@ app/
 │   ├── items/page.tsx          # 道具定義 CRUD
 │   ├── events/page.tsx         # 三合一：事件 + 看板畫面設定 + display token
 │   ├── finance/page.tsx        # 換匯所方案 + 銀行借貸方案
-│   └── settings/page.tsx       # 6 區塊：顯示/計分/新手/重生/範本池/危險區
+│   └── settings/page.tsx       # 7 區塊：顯示/計分/賣股扣分/重生/範本池/業力影響/危險區
 ├── captain/
 │   ├── page.tsx                # 關主後台（快捷模組設定）
 │   └── scan/page.tsx           # 關主前台掃碼（進行列表 + 完成結算 + 重生按鈕）
@@ -433,6 +435,12 @@ app/
 - [ ] PlayerHomeClient 地獄畫面進入條件少了 `!stats.final_scoring_at` → 終局結算後玩家無法回首頁查明細（規格 §1 / V2 下地獄機制：`is_dead && !tour_mode && !final_scoring_at`）
 - [ ] 命格 / 狀態卡片設了 `show_all_stats` 條件 → 違反規格。兩張卡都「永遠顯示」；狀態 label 反映業力區間、不暗示福分值，與 ShowAllStats 無關（ShowAllStats 只擋具體數值的數字本身）
 - [ ] 排行榜算分搬回 JS 端（撈全部 → JS sort + slice）→ 違反現行設計。**現行設計：score 預存在 `PlayerStats.final_score`**，每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 都會重算（見 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore`）。Leaderboard 查詢直接 `ORDER BY ps.final_score DESC LIMIT N`。**不要再下 LIMIT 但忘了 ORDER BY** — 那會隨機截掉高分玩家（已踩過坑）
+- [ ] `/display/board` 「展開最終榜單」按鈕在活動進行中也顯示 → 違反規格（按鈕**僅** `serverIsFinal === true` 時才出現，避免在公開看板讓觀眾 preview 終局結算未發生時的排名）
+- [ ] `/display/board` 常規模式仍渲染風雲榜 panel → 違反規格（`!isFinal` 時 panel **完全隱藏**，重點趨勢 + 行情總表 flex 自然填滿）
+- [ ] `restartGameCycle` 把 `BoardConfig.featured_stock_ids` 一起 reset → 違反規格（admin 設好的看板曲線商品**場次間保留**，只重置場次狀態：current_round / last_tick_at / marquee / final_scoring_triggered_at）
+- [ ] `drawDestiny` 在沒有 active 命格範本時走 `Initial*` AppSettings fallback → 違反規格（migration 0013 移除這條路徑；無範本直接 throw `CONFLICT`，要求 admin 必須先建立至少一個 active 範本）
+- [ ] 命格 / 狀態 顏色用 `karma` 值動態推算（emerald / amber / orange / rose 五色梯度）→ 違反規格（改用 `InitialValueTemplate.theme` / `KarmaBand.theme` 由 admin 設定的 6 色 enum，前端 `THEME_PALETTE` 對應）
+- [ ] Display Token 撤銷後直接呼叫 `deleteDisplayToken` 也允許 → 違反規格（後端 guard 只允許 `revoked_at IS NOT NULL OR expires_at < now()` 的 token 被刪除，前端只在已撤銷 / 已過期 row 顯示「刪除紀錄」按鈕）
 
 ---
 

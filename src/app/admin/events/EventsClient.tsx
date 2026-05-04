@@ -11,6 +11,7 @@ import {
   updateBoardConfig,
   issueDisplayToken,
   revokeDisplayToken,
+  deleteDisplayToken,
   type EventRow,
   type EventPayload,
   type BoardConfigRow,
@@ -84,6 +85,15 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
     } else showToast(false, r.error?.message ?? '');
   }
 
+  async function handleDeleteToken(jti: string) {
+    if (!confirm('刪除此 token 紀錄？此操作無法復原。')) return;
+    const r = await deleteDisplayToken(jti);
+    if (r.ok) {
+      setTokens((arr) => arr.filter((t) => t.jti !== jti));
+      showToast(true, '已刪除');
+    } else showToast(false, r.error?.message ?? '');
+  }
+
   function toggleFeatured(stockId: string) {
     if (!board) return;
     // 過濾掉已不存在於 stocks（被刪除）的殘留 ID — 不佔配額
@@ -109,9 +119,9 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
         </div>
       </header>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* 左：劇情事件排程 */}
-        <div className="xl:col-span-2 space-y-6">
+      <div className="space-y-8">
+        {/* Row 1：劇情事件排程（全寬） */}
+        <div className="space-y-6">
           <div className="flex justify-between items-end">
             <h3 className="text-lg font-bold text-zinc-200">劇情事件排程</h3>
             <button
@@ -183,8 +193,8 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
           </div>
         </div>
 
-        {/* 右：看板畫面設定 + Display Token */}
-        <div className="space-y-6">
+        {/* Row 2：看板畫面設定 ｜ 授權 Display Token（並排） */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
           {/* 看板畫面設定 */}
           <div className="glass-panel p-6 rounded-2xl border-t-4 border-t-teal-500">
             <h3 className="text-lg font-bold text-zinc-200 mb-2 flex items-center gap-2">
@@ -355,14 +365,24 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
                       <div className="text-[0.625rem] text-zinc-500 mb-1">
                         到期：{new Date(t.expires_at).toLocaleString()}
                       </div>
-                      {!revoked && !expired && (
-                        <button
-                          onClick={() => handleRevokeToken(t.jti)}
-                          className="text-[0.625rem] text-rose-400 hover:text-rose-300"
-                        >
-                          撤銷此 token
-                        </button>
-                      )}
+                      <div className="flex gap-3">
+                        {!revoked && !expired && (
+                          <button
+                            onClick={() => handleRevokeToken(t.jti)}
+                            className="text-[0.625rem] text-rose-400 hover:text-rose-300"
+                          >
+                            撤銷此 token
+                          </button>
+                        )}
+                        {(revoked || expired) && (
+                          <button
+                            onClick={() => handleDeleteToken(t.jti)}
+                            className="text-[0.625rem] text-zinc-500 hover:text-rose-300"
+                          >
+                            刪除紀錄
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })

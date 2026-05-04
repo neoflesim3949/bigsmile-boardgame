@@ -178,7 +178,7 @@
 | `draw_ratio` | INTEGER `CHECK (draw_ratio BETWEEN 0 AND 100)` DEFAULT 0 | 抽卡比例（%，0–100），quota = `floor(MaxDestinyDraws × draw_ratio / 100)` |
 | `created_at` | TIMESTAMPTZ | |
 
-> 管理員可建立多個範本。新玩家抽卡時從「啟用中」範本依比例配額抽（演算法見 [§5 drawDestiny](#51-玩家端) / CLAUDE.md「命格抽卡比例與配額」），連同視覺欄位（emoji / description / theme / rarity_label）一起回給前端 onboarding 頁。若無啟用範本，回退使用 `AppSettings` 的 `InitialMoney` / `InitialHealth` / `InitialBlessing` / `InitialKarma`，視覺套預設值。
+> 管理員可建立多個範本。新玩家抽卡時從「啟用中」範本依比例配額抽（演算法見 [§5 drawDestiny](#51-玩家端) / CLAUDE.md「命格抽卡比例與配額」），連同視覺欄位（emoji / description / theme / rarity_label）一起回給前端 onboarding 頁。**規格：每位玩家都必須抽命格**；若 admin 沒建立任何 active 範本，`drawDestiny` 直接回 `CONFLICT`（migration 0013 移除了原本的 `Initial*` AppSettings fallback 路徑）。
 
 > **抽卡比例與配額（CRITICAL）**：
 > - `MaxDestinyDraws`（AppSettings）= 比例計算基準（預設 100），**不是硬上限**
@@ -228,6 +228,7 @@
 | `health_delta` | INTEGER DEFAULT 0 | 每回合健康變動（套用後 cap 在 0–100） |
 | `blessing_delta` | INTEGER DEFAULT 0 | 每回合福分變動（套用後 floor 0） |
 | `karma_delta` | INTEGER DEFAULT 0 | 每回合業力變動（無上下限） |
+| `theme` | TEXT CHECK IN (`'amber'`, `'teal'`, `'purple'`, `'rose'`, `'sky'`, `'zinc'`) DEFAULT `'zinc'` | 色系（migration 0011，與 InitialValueTemplate.theme 共用 enum）— 玩家首頁狀態卡與後台 / 看板風雲榜的命格 / 狀態 badge 依此套色，不再從 karma 值動態推算 |
 | `sort_order` | INTEGER DEFAULT 0 | 重疊區段以小者優先（LATERAL LIMIT 1） |
 | `is_active` | BOOLEAN DEFAULT true | 是否納入計算 |
 | `created_at` / `updated_at` | TIMESTAMPTZ | |
@@ -500,15 +501,15 @@
 | 路由 | 角色 | 說明 |
 |------|------|------|
 | `/login` | 全部 | 登入頁 |
-| `/admin` | 管理員 | 大會後台「總覽面板」。包含：**頂部工具列**（導覽遊戲 toggle / 抽卡模式 toggle / 遊戲開始 / 遊戲結束計分 / 開啟活動看板 link）+ **3 KPI cards**（遊戲已進行時間 / 系統狀態 / 目前回合數）+ **3 控制台**（回合控制 = 推進下一回合按鈕；即時跑馬燈廣播 = textarea + 發送 + 清除；換匯所即時權重控制 = `-50%` `-20%` `0%` `+50%` `+100%` 自訂 6 鈕，套用 `ExchangeRateMultiplier`）+ **財富排行榜** |
+| `/admin` | 管理員 | 大會後台「總覽面板」。包含：**頂部工具列**（導覽遊戲 toggle / 抽卡模式 toggle / 遊戲開始 / 遊戲結束計分 / 開啟活動看板 link）+ **3 KPI cards**（遊戲已進行時間 / 系統狀態 / 目前回合數）+ **3 控制台**（回合控制 = 推進下一回合按鈕；即時跑馬燈廣播 = textarea + 發送 + 清除；換匯所即時權重控制 = `-50%` `-20%` `0%` `+50%` `+100%` 自訂 6 鈕，套用 `ExchangeRateMultiplier`）+ **風雲榜**（前身為「財富排行榜」）：撈全部 active player（不下 LIMIT，依 `final_score DESC`）→ 前端分頁（預設 20 / 可切 50 / 100）+ 6 欄可點排序（金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數）+ 命格 / 狀態 兩欄（pill badge 依 theme 套色）；rank 永遠依 final_score 固定不隨排序變化 |
 | `/admin/accounts` | 管理員 | 帳號 CRUD（admin / player / captain；列表 + 搜尋）。**player 角色額外提供「重置遊戲狀態」按鈕**（清四項數值、命格、持股、借貸、道具，保留帳號） |
 | `/admin/stations` | 管理員 | 關卡 CRUD（含 `allow_rebirth`、限額） + 關主指派 |
 | `/admin/stocks` | 管理員 | 股市商品列表（≤ 10 檔）+ **股市大盤回合腳本總表**（每回合 × 每檔股票的 % 或 $ 變動 + 事件跑馬燈，推進回合時自動套用） |
 | `/admin/stocks/[id]` | 管理員 | 單一股票歷史價格曲線（read-only；編輯走列表頁 modal） |
 | `/admin/items` | 管理員 | 道具定義 CRUD |
-| `/admin/events` | 管理員 | 三合一頁：劇情事件排程 CRUD + 看板畫面設定（主標題、重點商品、配色、輪播秒數）+ Display Token 管理（發行 / 撤銷） |
+| `/admin/events` | 管理員 | 三合一頁，**兩列佈局**：Row 1 「劇情事件排程」全寬 CRUD table；Row 2 「看板畫面設定」（主標題、重點商品、配色、輪播秒數）/「授權 Display Token」並排（grid-cols-2）。Token 列表撤銷 / 過期後可進一步「刪除紀錄」（`deleteDisplayToken`，後端 guard 只允許刪非 active token） |
 | `/admin/finance` | 管理員 | 財務設定（換匯所方案、銀行借貸規則） |
-| `/admin/settings` | 管理員 | 參數設定頁，6 個 section：**數值顯示**（ShowAllStats）、**最終計分權重**（3 weights）、**預設新手初始值**（4 nums）、**重生後初始值**（4 nums）、**新手命格範本池**（CRUD）、**危險操作區**（5 按鈕 × 3 次確認）。**不含活動時間 / 匯率 / 銀行**（這些在別處：活動時間旗標走 `/admin` dashboard 工具列；換匯倍率走 `/admin` 控制台；換匯方案與銀行借貸方案走 `/admin/finance`） |
+| `/admin/settings` | 管理員 | 參數設定頁，**7 個 section**：**數值顯示**（ShowAllStats）、**最終計分權重**（3 weights）、**賣股福分扣分**（divisor）、**重生後初始值**（4 nums）、**新手命格範本池**（CRUD）、**業力影響**（KarmaBand CRUD）、**危險操作區**（5 按鈕 × 3 次確認）。**不含活動時間 / 匯率 / 銀行**（這些在別處：活動時間旗標走 `/admin` dashboard 工具列；換匯倍率走 `/admin` 控制台；換匯方案與銀行借貸方案走 `/admin/finance`） |
 | `/captain` | 關主 | 關主後台首頁（巨大掃碼入口 + 快捷模組列表） |
 | `/captain/actions` | 關主 | 快捷模組編輯（建立 / 修改 / 刪除四項參數變動規則） |
 | `/captain/scan` | 關主 | 關主前台掃碼介面（進行列表 + 完成結算 + 重生按鈕） |
@@ -616,7 +617,7 @@ src/app/
 │   ├── items/page.tsx             # 道具定義 CRUD
 │   ├── events/page.tsx            # 三合一：事件 CRUD + 看板畫面設定 + display token
 │   ├── finance/page.tsx           # 換匯所方案 + 銀行借貸方案
-│   └── settings/page.tsx          # 6 區塊：顯示 / 計分權重 / 新手 / 重生 / 範本池 / 危險區
+│   └── settings/page.tsx          # 7 區塊：顯示 / 計分權重 / 賣股扣分 / 重生 / 範本池 / 業力影響 / 危險區
 ├── display/board/page.tsx         # 活動看板（強制深色，display token 授權）
 └── actions/                       # Server Actions（player.ts, captain.ts, admin.ts, stock.ts, auth.ts）
 
@@ -696,7 +697,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `setStockPrice(stockId, price)` | 即時手動調整單檔股價（不等回合，自動寫入歷史） | pg tx |
 | `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — **前置 guard**：Tx1 開頭驗 `BoardGameEnabled === 'true'` && `final_scoring_triggered_at IS NULL`，不符直接 `FORBIDDEN`。Tx1 流程：(a) 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory`；(b) 若 `StockRoundEvent.event_text` 有文字 → UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min`；(c) **強制平倉**（若 `force_liquidation_ratio > 0`）— 單條 CTE SQL 對所有 StockHolding 套 `FLOOR(shares × ratio / 100)`，賣價 $0 / `avg_cost` 不變 / 剩 0 則 DELETE / 每筆寫 `forced_liquidation` Transaction；(d) **業力影響** — 單條 CTE 對所有 `health > 0 AND blessing > 0` 玩家依當下 karma 取對應 `KarmaBand`（LATERAL LIMIT 1，重疊以 `sort_order` 小者優先），套四項 delta（health cap [0, 100]、money / blessing floor 0、karma 不限），跳過全 0 delta 的 band，每筆寫 `karma_band_effect` Transaction；(e) `BoardConfig.current_round += 1`；(f) **第 1 回合**（newRound === 1）UPSERT `AppSettings TourMode = 'false'`；(g) 寫 `round_tick` Transaction 紀錄。Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（按 balance/principal 比例算）。30 秒 debounce（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
 | `triggerFinalScoring()` | 觸發終局結算：寫 `BoardConfig.final_scoring_triggered_at = now()`；之後玩家寫入全部被 `assertNotDuringFinalScoring` 擋；看板自動切到排行榜畫面。**不可復原**（要再玩請走 `restartGameCycle`） | pg tx |
-| `restartGameCycle()` | **重啟新一場（核重置）**：在 pg tx 內清空：(1) PlayerStats 四項數值 / 命格 / 重生計數 / bank_loan / loan_updated_at / last_manual_refresh_at；(2) StockHolding / PlayerLoan / PlayerItem；(3) StockHistory / StockRoundScript / StockRoundEvent；(4) StationUsage / QuickActionUsage、Station 與 QuickAction 的 global_use_count；(5) BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at / featured_stock_ids）；(6) Event.is_active = false（保留事件定義但全部停用）。tx 外重設 AppSettings 旗標（`BoardGameEnabled` / `BoardGameStartedAt` / `CardDrawMode` / `TourMode` 全部 false/空）。**保留**：Account / Stock 商品定義（current_price 保留）/ Item / Station / QuickAction / InitialValueTemplate / **KarmaBand** / ExchangeOption / BankLoanOption / Transaction 稽核。Dashboard 已計分時把「已計分」按鈕換成此功能，**前端強制 5 次確認彈窗** | pg tx |
+| `restartGameCycle()` | **重啟新一場（核重置）**：在 pg tx 內清空：(1) PlayerStats 四項數值 / 命格 / 重生計數 / bank_loan / loan_updated_at / last_manual_refresh_at / `final_score`；(2) StockHolding / PlayerLoan / PlayerItem；(3) StockHistory / StockRoundScript / StockRoundEvent；(4) StationUsage / QuickActionUsage、Station 與 QuickAction 的 global_use_count；(5) BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at；**`featured_stock_ids` 不清，admin 設好的看板曲線商品場次間保留**）；(6) Event.is_active = false（保留事件定義但全部停用）。tx 外重設 AppSettings 旗標（`BoardGameEnabled` / `BoardGameStartedAt` / `CardDrawMode` / `TourMode` 全部 false/空）。**保留**：Account / Stock 商品定義（current_price 保留）/ Item / Station / QuickAction / InitialValueTemplate / **KarmaBand** / ExchangeOption / BankLoanOption / Transaction 稽核 / `BoardConfig.featured_stock_ids`。Dashboard 已計分時把「已計分」按鈕換成此功能，**前端強制 5 次確認彈窗** | pg tx |
 | `listKarmaBands()` / `upsertKarmaBand(payload)` / `deleteKarmaBand(id)` | 業力影響區段 CRUD（`/admin/settings` 命格範本下方的「業力影響」table 使用） | 無 |
 | `setStockPriceRule(rule)` | 設定 `AppSettings.StockPriceRule`（下回合用的漲跌規則） | 無 |
 | `resetStockHistory()` | **每場活動開場前手動觸發**：`DELETE FROM "StockHistory"`（清空股價歷史，避免上場活動的曲線殘留到本場）；同時將 `BoardConfig.current_round` 重置為 0；寫一筆 `Transaction`（`tx_type='settings_update'`，payload 註明 reset stock history）；**僅 admin 可執行，前端二次確認** | pg tx |
@@ -714,7 +715,8 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `clearPlayerInventory(userId)` | 清空玩家道具與持股（測試或誤發復原） | pg tx |
 | `bulkImportAccounts(csv)` | CSV 批次匯入（活動前一次建好玩家／關主） | pg tx |
 | `issueDisplayToken(payload)` | 發行活動看板的 display token（TTL、用途備註） | 無 |
-| `revokeDisplayToken(token)` | 撤銷指定 display token | 無 |
+| `revokeDisplayToken(token)` | 撤銷指定 display token（設 `revoked_at = now()`，row 仍存在） | 無 |
+| `deleteDisplayToken(jti)` | 刪除 token 紀錄（後端 guard 只允許 `revoked_at IS NOT NULL OR expires_at < now()`，避免誤刪有效 token；UI 在已撤銷 / 已過期 row 顯示「刪除紀錄」按鈕） | 無 |
 | `setBoardLayout(layout)` | 設定活動看板版型（重點曲線商品、配色） | 無 |
 | `upsertEvent(payload)` | 新增／編輯後台事件 | 無 |
 | `deleteEvent(id)` | 刪除事件 | 無 |
@@ -756,10 +758,9 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `ScoreWeightMoney` | 數字字串 | 最終計分：金錢權重（建議 `'0.05'`） |
 | `ScoreWeightBlessing` | 數字字串 | 最終計分：福分權重（建議 `'200'`） |
 | `ScoreWeightKarma` | 數字字串 | 最終計分：業力權重（建議 `'150'`，公式中為扣除） |
-| `InitialMoney` | 數字字串 | 新玩家初始金錢（命格範本不可用時 fallback） |
-| `InitialHealth` | 數字字串 | 新玩家初始健康（fallback） |
-| `InitialBlessing` | 數字字串 | 新玩家初始福分（fallback） |
-| `InitialKarma` | 數字字串 | 新玩家初始業力（fallback） |
+<!-- migration 0013 移除：InitialMoney / InitialHealth / InitialBlessing / InitialKarma；
+     原為「無 active 命格範本時 fallback 給新玩家用的初始值」；
+     規格改為「每玩家都必抽命格」，無範本則 drawDestiny throw CONFLICT -->
 | `MaxDestinyDraws` | 數字字串（預設 `'100'`） | **命格抽卡比例計算基準**：`InitialValueTemplate.draw_ratio` 換算 quota = `floor(MaxDestinyDraws × draw_ratio / 100)`。**不是硬上限**，超過會走滾動 cycle 繼續按比例分配。`/admin/settings` 命格範本池區頂部設定 |
 | `RebirthMoney` | 數字字串 | 重生後金錢初始值（與新玩家初始值分開管理） |
 | `RebirthHealth` | 數字字串 | 重生後健康初始值 |
@@ -1109,7 +1110,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
   - `Event` INSERT/UPDATE/DELETE → 重算命中事件（事件單獨訂閱 OK，量低）
 - **為什麼推→拉**：避免 `tickRound` 一次推 21 條事件（10 檔 Stock UPDATE + 10 筆 StockHistory INSERT + 1 筆 BoardConfig UPDATE）讓看板 React 重渲染 21 次；改成「收到單一 `BoardConfig` 信號 → 拉一次完整快照」既保 < 1 秒延遲、又把多事件合 1
 - **不訂閱 `Stock` / `StockHistory`**：減少前端事件量、簡化 RLS 範圍（看板的 anon role 只需要 SELECT `BoardConfig` / `Event` / `Stock` / `StockHistory`，但訂閱層只要前兩張）
-- **獨立 `BoardConfig` 表的好處**：Supabase Realtime 不支援 server-side filter by key；專用表避免訂閱 `AppSettings` 整表時被 `ScoreWeight*` / `InitialMoney` 等無關 key 變更污染
+- **獨立 `BoardConfig` 表的好處**：Supabase Realtime 不支援 server-side filter by key；專用表避免訂閱 `AppSettings` 整表時被 `ScoreWeight*` / `RebirthMoney` 等無關 key 變更污染
 - **RLS**：建立看板專用 anon role，**僅 SELECT** `Stock` / `StockHistory` / `Event` / `BoardConfig` 四張表的公開欄位（不含 `Account`、`Transaction`、`AppSettings` 等敏感表）
 - **延遲目標**：變更瞬間 → 看板更新 < 1 秒（信號推 → fetch 快照 ≈ 200-500 ms）
 
@@ -2038,19 +2039,26 @@ npm run lint     # ESLint 檢查
 │    金錢 [0.05]   福分 [200]   業力 [150]                    │
 │    公式：金錢×0.05 + 福分×200 − 業力×150                     │
 │                                                              │
-│ 3. 預設新手初始值                                            │
-│    金錢 [1000]  健康 [80]  福分 [5]  業力 [0]                │
+│ 3. 賣股福分扣分                                              │
+│    每 [10000] 獲利扣 1 福分（divisor，預設 10000）            │
+│    預覽：5K profit→1 / 10K→1 / 50K→5                         │
 │                                                              │
 │ 4. 重生後初始值                                              │
 │    金錢 [500]   健康 [50]  福分 [3]  業力 [0]                │
 │                                                              │
 │ 5. 新手命格範本池                              [ + 新增 ]    │
 │    總人數基準（MaxDestinyDraws）[ 100 ]                      │
-│    ▸ 富貴命  🀄  rare    1000/80/5/0    [10%] quota=10  ✓   │
+│    ▸ 富貴命  ⭐  rare    1000/80/5/0    [10%] quota=10  ✓   │
 │    ▸ 慈悲命  🌸  common  500/100/10/0   [30%] quota=30  ✓   │
 │    ▸ 勞碌命  ⛏  common  2000/60/10/5   [60%] quota=60  ✓   │
 │    合計：100%（綠）／不為 100% 紅字警示但不擋儲存             │
 │    ⓘ 抽完 100 人後系統不擋玩家，第 101 人開始第二輪 cycle    │
+│                                                              │
+│ 6. 業力影響（KarmaBand）                       [ + 新增 ]    │
+│    依玩家當下 karma 對應一個狀態，每回合套四項 delta          │
+│    ▸ 光明  ≤-200    money 0  health 0  blessing +10  ✓ teal │
+│    ▸ 平凡  -199~0   全 0（不寫 Transaction）          ✓ zinc │
+│    ▸ 墮落  ≥300    money 0  health -2  blessing -2   ✓ rose │
 │                                                              │
 │ ─── 危險操作區（每個按鈕 3 步確認 modal）───                  │
 │ [重置會員明細] [刪除所有會員] [重置股價歷史]                  │
@@ -2058,50 +2066,54 @@ npm run lint     # ESLint 檢查
 └──────────────────────────────────────────────────────────────┘
 ```
 
+> **規格注意**：原本有「3. 預設新手初始值（InitialMoney/Health/Blessing/Karma）」section + DB key，已於 migration 0013 移除。改為「每位玩家都必抽命格」— 若 admin 沒建任何 active 命格範本，`drawDestiny` 直接 throw `CONFLICT`。重生後初始值不受影響（獨立 `Rebirth*` keys）。
+
 ---
 
 ### 16.5 看板路由實況
 
 #### `/display/board`（活動看板，1920×1080，強制深色 + pointer-events-none）
 
-**toggle 邏輯**：右上「展開最終榜單 / 返回常規模式」用 `userOverride: boolean | null` state：
+**「展開最終榜單」按鈕僅在 `serverIsFinal === true`（admin 已觸發終局結算）才出現**；活動進行中不允許 preview 終局模式（避免在玩家可看到的看板上洩漏即時排名）。按鈕顯示後使用 `userOverride: boolean | null` state：
 - `null`：跟 server 狀態 `final_scoring_triggered_at`
 - `true / false`：user 主動 toggle 鎖定值，不再被 server 蓋過
 - 公式：`isFinal = userOverride !== null ? userOverride : serverIsFinal`
 - 用途：終局結算後仍可切回常規看股市（不會被 final_scoring 鎖死）
 
-**風雲榜表頭**：
-- regular 模式（14% 窄欄）：整個 `<thead>` **不渲染**（圓圈獎牌 + 姓名自明，sticky thead 在窄欄會視覺脫節）
-- final 模式（全寬 8 欄）：保留 sticky thead 給排序按鈕用
+**風雲榜 panel 出現條件**：
+- 常規模式（`!isFinal`，活動進行中）→ **panel 完全隱藏**，`重點趨勢` + `行情總表` 兩欄 flex 自然佔滿全寬（解放原本 14% 窄欄空間）
+- 終局模式（`isFinal`）→ panel 全寬展開，含 sticky thead 與所有排序欄位
+
+**終局風雲榜欄位（10 欄）**：排名 / 姓名 / **命格**（依 `destiny_theme` 套色 pill）/ **狀態**（依 `karma_band_theme` 套色 pill）/ 金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數。所有數值欄位可點 header 排序（active 顯示 amber 箭頭）；rank 永遠依 `final_score DESC` 固定，不隨當前排序欄位變化（V2.md §8 名次固定原則）。
 
 ```text
-常規模式（活動進行中）：54 / 32 / 14 三欄
+常規模式（活動進行中）：兩欄 flex 自然填滿（風雲榜 panel 隱藏）
 ┌──────────────────────────────────────────────────────────────────────┐
-│ ✨ 開運大富翁 ── 大廳     [第 6 回合] [14:52:53 | 05/02] [●已連線] [🏆]│
-├────────────────────────────┬────────────────┬────────────────────────┤
-│ 重點趨勢（54%）            │ 行情總表（32%） │ 風雲榜（14%）          │
-│ ┌──────┬──────┬──────┐   │ 代碼  價格 漲跌 │ 排名  姓名             │
-│ │BTC   │TSMC  │CCAI  │   │ BTC   128 +5%↑│ 🥇 1  player           │
-│ │ 趨勢 │ 趨勢 │ 趨勢 │   │ TSMC  836 -2%↓│ 🥈 2  小美             │
-│ ├──────┼──────┼──────┤   │ CCAI  153 +10%↑│ 🥉 3  小明             │
-│ │XYZ   │DEF   │GHI   │   │ ...            │ 4   阿華             │
-│ │ 趨勢 │ 趨勢 │ 趨勢 │   │                │ ...                   │
-│ └──────┴──────┴──────┘   │                │                       │
-├────────────────────────────┴────────────────┴────────────────────────┤
+│ ✨ 開運大富翁 ── 大廳     [第 6 回合] [14:52:53 | 05/02] [● 已連線] │  ← 無展開按鈕
+├──────────────────────────────────────────┬──────────────────────────┤
+│ 重點趨勢（flex 1，約 54%）               │ 行情總表（flex 1，約 46%）│
+│ ┌──────┬──────┬──────┐                  │ 代碼  價格    漲跌        │
+│ │BTC   │TSMC  │CCAI  │                  │ BTC   128    +5%↑         │
+│ │ 趨勢 │ 趨勢 │ 趨勢 │                  │ TSMC  836    -2%↓         │
+│ ├──────┼──────┼──────┤                  │ CCAI  153    +10%↑        │
+│ │XYZ   │DEF   │GHI   │                  │ ...                       │
+│ │ 趨勢 │ 趨勢 │ 趨勢 │                  │                           │
+│ └──────┴──────┴──────┘                  │                           │
+├──────────────────────────────────────────┴──────────────────────────┤
 │ 📢 大會事件：股神就是你！下午茶時段加碼開始                            │
 │ 📍 跑馬燈：開運大富翁活動進行中... ⚡                                  │
 └──────────────────────────────────────────────────────────────────────┘
 
-最終結算模式：左 + 中欄隱藏，風雲榜全寬展開
+最終結算模式：風雲榜全寬展開
 ┌──────────────────────────────────────────────────────────────────────┐
 │ ✨ 開運大富翁 ── 大廳   [第 12 回合] [16:00:00] [● 已連線] [返回常規]│
 ├──────────────────────────────────────────────────────────────────────┤
 │ 🏆 風雲榜（最終結算成績） — 全寬展開、可點欄排序，rank 永遠鎖 final  │
 │ ─────────────────────────────────────────────────────────────────── │
-│ 排名│姓名      │金錢↕  │福份↕│健康↕│業力↕│重生↕│最終分數↕          │
-│ 🥇1 │ player   │5,000 │  5 │ 80  │  0 │  0 │   1,250            │
-│ 🥈2 │ 小美     │4,800 │  3 │100  │  2 │  0 │   1,140            │
-│ 🥉3 │ 小明     │3,500 │  8 │ 60  │  1 │  0 │   1,025            │
+│ 排名│姓名    │命格      │狀態  │金錢↕│福份↕│健康↕│業力↕│重生↕│最終│
+│ 🥇1 │ player │清修命teal│光明  │5,000│  5  │ 80  │  0  │  0  │1,250│
+│ 🥈2 │ 小美   │富貴命amber│墮落 │4,800│  3  │100  │  2  │  0  │1,140│
+│ 🥉3 │ 小明   │勞碌命rose│渙散  │3,500│  8  │ 60  │  1  │  0  │1,025│
 ├──────────────────────────────────────────────────────────────────────┤
 │ 📢 大會事件 / 跑馬燈（同常規模式）                                    │
 └──────────────────────────────────────────────────────────────────────┘
