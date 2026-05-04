@@ -13,6 +13,7 @@
 - 角色：**三分互斥** — 大會管理員 / 玩家 / 關主（關主**不參與遊戲本身**，純發放分數的工具人）；活動看板靠 display token 唯讀，不算 Account 角色
 - 主要頁面：管理後台（桌面優先）、關主後台 / 掃碼（手機）、玩家首頁、股市、活動看板
 - 特殊功能:**重生鍵** — 特定關卡的關主可對玩家執行「重生」：**全部歸零重來** — 四項參數重設為重生初始值、清空所有持股、清空銀行借款（含 `loan_updated_at`）、**清空所有道具**。**前置防呆**：玩家必須**主動**在地獄畫面把 QR 拿給關主掃（**手動輸入 ID 路徑不會出現重生鍵**，前後端雙重驗證），且後端 pg tx 內即時驗證 `health ≤ 0 || blessing ≤ 0`，未死亡的玩家不能被任意重置
+- **地獄畫面在終局結算後不鎖**：條件改為 `is_dead && !tour_mode && !final_scoring_at`。遊戲結束後即使玩家 `health/blessing ≤ 0` 也讓他正常進入玩家中心查看明細；所有寫入由後端 `assertNotDuringFinalScoring` 統一拒絕（玩家 / 關主端皆然），前端不依賴鎖頁來阻擋寫入
 - 玩家進入頁面時若 `AppSettings.CardDrawMode==='true'` 且 `destiny_name=NULL` → middleware 強制導 `/onboarding` 抽命格範本；抽完才能進 `/`。**觸發條件不是「首次登入」**：只要兩條件同時成立（抽卡模式開啟 + 尚無命格）就會被導向，無論第幾次進站。若 `CardDrawMode==='false'` 或玩家已有 `destiny_name`，自行進 `/onboarding` 一律被擋回 `/`
 
 ### 命格抽卡比例與配額（CRITICAL）
@@ -247,6 +248,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **「福分／福報」字眼可見範圍**（CRITICAL，含同義字）：
   - ✅ **可見**：admin / captain 後台所有頁面、看板（display/board）含 sparkline 與最終結算榜單、玩家最終結算後的歷史明細
   - 🟡 **`/onboarding` 抽命格**：保留福分 / 業力**欄位**讓 layout 一致，但**數值固定顯示「???」**不論哪種命格（避免一開始就暴露玩家自身命格的福分 / 業力）
+  - ✅ **永遠可見**：`/` 玩家首頁的「命格」+「狀態」卡片列（位於四項數值卡上方）。狀態卡顯示當下 KarmaBand label（光明 / 平凡 / 微濁 / 渙散 / 迷失 / 墮落 等）。**ShowAllStats 控制的是「具體數值」（福分 / 業力的數字本身），不擋 label 文字**；狀態 label 反映業力區間、不暗示福分值，所以永遠顯示無衝突
   - ✅ **條件可見**：`/`、`/stock` 等玩家日常頁面在 `ShowAllStats=true` 時可顯示福分卡片
   - ❌ **不可見**（即使 ShowAllStats=true 也禁止）：`/exchange` 與 `/bank` 路由（CLAUDE.md §6.2）— 任何錯誤訊息、UI label、計算過程都不能含「福分」「福報」字眼
   - ❌ **依 ShowAllStats 隱藏**：玩家頁面的 settings 字體預覽、history 錯誤提示文字、地獄畫面死因說明 — `ShowAllStats=false` 時改用「指標」「隱藏參數」等籠統字眼
@@ -428,6 +430,8 @@ app/
 - [ ] 看板 `/display/board` 終局結算後 toggle 「返回常規模式」無效 — 不可寫 `isFinal = forceFinal || final_scoring_triggered_at`（被 server 鎖死），要改成 `userOverride !== null ? userOverride : serverIsFinal` 讓 user 真的能切回看股市
 - [ ] 看板風雲榜 regular 模式（14% 窄欄）若用 sticky thead 會視覺脫節 → 整個 thead 不渲染，圓圈+姓名自明
 - [ ] 玩家日常頁（地獄畫面 / settings 預覽 / history 提示）`ShowAllStats=false` 時直接寫「福分」「業力」字眼 → 違反 §6.2 字眼可見範圍（必須改用「指標」「隱藏參數」籠統字眼，admin / captain 後台 / onboarding / 最終結算可見）
+- [ ] PlayerHomeClient 地獄畫面進入條件少了 `!stats.final_scoring_at` → 終局結算後玩家無法回首頁查明細（規格 §1 / V2 下地獄機制：`is_dead && !tour_mode && !final_scoring_at`）
+- [ ] 命格 / 狀態卡片設了 `show_all_stats` 條件 → 違反規格。兩張卡都「永遠顯示」；狀態 label 反映業力區間、不暗示福分值，與 ShowAllStats 無關（ShowAllStats 只擋具體數值的數字本身）
 
 ---
 

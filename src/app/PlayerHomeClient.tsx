@@ -50,8 +50,9 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   }
 
   // ─── 地獄畫面 ────────────────────────────────────────────────
-  // 導覽模式下不顯示地獄畫面（即使 is_dead；admin 可在示範時切到 dead 看四項值畫面）
-  if (stats.is_dead && !stats.tour_mode) {
+  // 導覽模式下不顯示地獄畫面（admin 在示範時可切到 dead state 看數值畫面）
+  // 終局結算後不再顯示地獄畫面（讓玩家回玩家中心查看明細，所有寫入已被後端 assertNotDuringFinalScoring 擋）
+  if (stats.is_dead && !stats.tour_mode && !stats.final_scoring_at) {
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
         <Skull className="w-16 h-16 text-rose-500 mb-4 animate-pulse" />
@@ -80,22 +81,11 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   // ─── 正常畫面 ────────────────────────────────────────────────
   return (
     <div className="min-h-screen page-bg p-4 pb-20">
-      <header className="flex justify-between items-center mb-6 pl-2 pr-2 mt-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <h1 className="text-2xl font-bold text-amber-500 truncate">{stats.name}</h1>
-            {stats.destiny_name && (
-              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap">
-                {stats.destiny_name}
-              </span>
-            )}
-            {stats.show_all_stats && stats.karma_band_label && (
-              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border whitespace-nowrap ${karmaBandStyle(stats.karma)}`}>
-                {stats.karma_band_label}
-              </span>
-            )}
-          </div>
-          <p className="text-zinc-500 text-sm">{stats.user_id}</p>
+      <header className="flex justify-between items-center mb-4 pl-2 pr-2 mt-2">
+        <div className="min-w-0 flex-1 flex items-baseline gap-2">
+          <h1 className="text-2xl font-bold text-amber-500 truncate">{stats.name}</h1>
+          <span className="text-zinc-600">｜</span>
+          <p className="text-zinc-500 text-sm truncate">ID:{stats.user_id}</p>
         </div>
         <div className="flex items-center gap-2">
           <QrButton name={stats.name} userId={stats.user_id} />
@@ -132,6 +122,28 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
           終局結算已觸發，玩家寫入停用
         </div>
       )}
+
+      {/* 命格 + 狀態（永遠顯示）*/}
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div className="glass-panel p-4 rounded-2xl">
+          <div className="flex items-center gap-2 mb-1.5 text-zinc-400">
+            <span className="text-amber-400">🀄</span>
+            <span className="text-sm font-medium">命格</span>
+          </div>
+          <p className="text-xl font-bold text-amber-400 truncate">
+            {stats.destiny_name ?? '—'}
+          </p>
+        </div>
+        <div className={`glass-panel p-4 rounded-2xl border ${karmaBandStyle(stats.karma)}`}>
+          <div className="flex items-center gap-2 mb-1.5 text-zinc-400">
+            <Scale className="w-4 h-4" />
+            <span className="text-sm font-medium">狀態</span>
+          </div>
+          <p className="text-xl font-bold truncate">
+            {stats.karma_band_label ?? '—'}
+          </p>
+        </div>
+      </div>
 
       {/* 4 stat cards */}
       <div className="grid grid-cols-2 gap-3 mb-6">

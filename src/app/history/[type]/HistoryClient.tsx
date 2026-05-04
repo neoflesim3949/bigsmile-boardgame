@@ -49,6 +49,10 @@ function n(v: unknown): number | null {
 /** 把 payload 細節渲染成一句人類可讀的描述。回傳 null 代表沒有額外細節要顯示。 */
 function describe(txType: string, payload: Record<string, unknown>): string | null {
   switch (txType) {
+    case 'destiny_draw': {
+      const dn = s(payload.destiny_name);
+      return dn ? `抽取命格（${dn}）` : null;
+    }
     case 'quick_action': {
       const station = s(payload.station_name);
       const label = s(payload.quick_action_label);
@@ -141,9 +145,15 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
       return round != null ? `第 ${round} 回合處於「${band}」狀態` : `處於「${band}」狀態`;
     }
     case 'exchange': {
+      const label = s(payload.option_label);
       const units = n(payload.units);
-      const moneyGained = n(payload.money_gained);
-      if (units != null && moneyGained != null) return `兌換 ${units} 單位 → +$${moneyGained.toLocaleString()}`;
+      // 新版 schema 用 money_gain；舊版 row 可能是 money_gained → 兩邊兼容
+      const moneyGain = n(payload.money_gain) ?? n(payload.money_gained);
+      const labelStr = label ? `${label} ` : '';
+      if (units != null && moneyGain != null) {
+        return `兌換 ${labelStr}×${units} 單位 → +$${moneyGain.toLocaleString()}`;
+      }
+      if (units != null) return `兌換 ${labelStr}×${units} 單位`;
       return null;
     }
     case 'bank_borrow': {

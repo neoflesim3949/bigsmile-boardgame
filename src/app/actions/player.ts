@@ -525,8 +525,8 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
     const result = await withTx(async (client) => {
       await assertNotDuringFinalScoring(client);
       await assertNotTourMode(client);
-      const opt = await client.query<{ blessing_cost_per_unit: number; money_gain_per_unit: number }>(
-        `SELECT blessing_cost_per_unit, money_gain_per_unit
+      const opt = await client.query<{ label: string; blessing_cost_per_unit: number; money_gain_per_unit: number }>(
+        `SELECT label, blessing_cost_per_unit, money_gain_per_unit
          FROM "ExchangeOption" WHERE id = $1 AND is_active = true`,
         [data.optionId],
       );
@@ -562,7 +562,14 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
          VALUES ($1, $1, 'exchange', $2)`,
-        [session.userId, JSON.stringify({ option_id: data.optionId, units: data.units, blessing_cost: totalCost, money_gain: totalGain })],
+        [session.userId, JSON.stringify({
+          option_id: data.optionId,
+          option_label: opt.rows[0].label,
+          units: data.units,
+          per_unit_money: effectivePerUnit,
+          blessing_cost: totalCost,
+          money_gain: totalGain,
+        })],
       );
       return { money_gained: totalGain, new_balance: upd.rows[0] };
     });

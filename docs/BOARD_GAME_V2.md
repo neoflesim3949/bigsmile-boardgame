@@ -220,7 +220,8 @@
 ## 6. 使用者介面
 
 ### 顯示項目
-- 姓名
+- 姓名（與 ID 同一行：`姓名 ｜ ID:XXXX`）
+- **命格 / 狀態 卡片（永遠顯示，不受 ShowAllStats 影響）**：在四項數值卡上方多一列，左為命格名（amber 色）、右為依當下 karma 對應的 KarmaBand label（顏色依 karma 區間：`≤-100` emerald / `-99~99` zinc / `100-199` amber / `200-299` orange / `≥300` rose）。當下 karma 落在沒有 active band 的範圍時 label 顯示 `—`。**ShowAllStats 控制的是「具體數值」（福分 / 業力的數字本身），不擋 label**；狀態 label 反映業力區間、不暗示福分值，永遠顯示無衝突。
 - **金錢**（玩家之間可互轉）、**健康** — 始終顯示，上限 100
 - **福分**、**業力** — 僅當 `ShowAllStats = true` 時顯示（或於活動結束時強制全開）。`ShowAllStats=false` 時 UI 顯示鎖定卡片 *** + lock icon，**仍保留「福分」「業力」label**（不影響玩家認知，但不顯示數值）
 - **個人歷史明細**：當活動進入「遊戲結束」狀態（大結算）時，這四張數值卡片將轉為「可點擊」的按鈕。玩家點擊單一數值（例如「金錢」），系統便會彈出該項數值在整局遊戲中的「完整交易明細」，讓玩家回顧自己的大起大落。
@@ -240,6 +241,10 @@
   - 玩家 App 鎖定為「地獄畫面」，**僅顯示 QR Code + 玩家姓名 + UserID**（旁邊大字）
   - 所有操作停用（換匯、轉帳、股市買賣等皆不可用）
   - 玩家只能展示 QR Code 給關主掃描；若關主相機掃不到，可改用 QR 旁顯示的 ID 由關主**手動輸入查詢**（但手動路徑不會出現重生鍵，仍需設法掃 QR）
+- **終局結算後的例外**：當 `BoardConfig.final_scoring_triggered_at` 已設置（遊戲結束）：
+  - **不再顯示地獄畫面**，即使玩家 `health ≤ 0 || blessing ≤ 0` 也讓玩家正常進入玩家中心查看明細
+  - 所有寫入操作仍由後端 `assertNotDuringFinalScoring` 統一拒絕（玩家 / 關主端皆然），不需依賴前端鎖頁
+  - 邏輯條件：`is_dead && !tour_mode && !final_scoring_at`（PlayerHomeClient.tsx 地獄畫面進入條件）
 - **解除方式**：找到擁有「重生鍵」的關主（`allow_rebirth = true`）掃描 QR Code 並執行重生
   - **重生鍵出現的防呆條件（缺一不可）**：
     1. 該關卡 `Station.allow_rebirth === true`
