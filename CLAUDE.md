@@ -433,10 +433,14 @@ app/
 - [ ] 看板風雲榜 regular 模式（14% 窄欄）若用 sticky thead 會視覺脫節 → 整個 thead 不渲染，圓圈+姓名自明
 - [ ] 玩家日常頁（地獄畫面 / settings 預覽 / history 提示）`ShowAllStats=false` 時直接寫「福分」「業力」字眼 → 違反 §6.2 字眼可見範圍（必須改用「指標」「隱藏參數」籠統字眼，admin / captain 後台 / onboarding / 最終結算可見）
 - [ ] PlayerHomeClient 地獄畫面進入條件少了 `!stats.final_scoring_at` → 終局結算後玩家無法回首頁查明細（規格 §1 / V2 下地獄機制：`is_dead && !tour_mode && !final_scoring_at`）
+- [ ] 終局結算後玩家首頁福分 / 業力 仍受 `ShowAllStats` 控制顯示鎖頭 → 違反 V2 §6.2「玩家最終結算後的歷史明細」可見規格。正確條件：`stats.show_all_stats || stats.final_scoring_at` 任一為真就解鎖
+- [ ] 終局結算後玩家首頁的「換匯所 / 銀行借貸 / 轉帳」按鈕仍是 `<Link>` → 玩家點下去才被後端拒絕，UX 差。正確：套 `<DisabledAction>` 占位元件直接 disable 顯示「已結算停用」
+- [ ] 終局結算後玩家首頁沒揭曉 modal → 違反規格。實作：`FinalScoreModal` 顯示排名（含 🥇🥈🥉）+ 最終分數 + 命格 / 狀態 + 四項數值，含「不再顯示」checkbox（localStorage key `final_score_dismissed_<userId>` 存的是 `final_scoring_at` 時間戳，下一場 admin 重啟後會自動失效）。每次回首頁就會重新檢查 localStorage
 - [ ] 命格 / 狀態卡片設了 `show_all_stats` 條件 → 違反規格。兩張卡都「永遠顯示」；狀態 label 反映業力區間、不暗示福分值，與 ShowAllStats 無關（ShowAllStats 只擋具體數值的數字本身）
 - [ ] 排行榜算分搬回 JS 端（撈全部 → JS sort + slice）→ 違反現行設計。**現行設計：score 預存在 `PlayerStats.final_score`**，每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 都會重算（見 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore`）。Leaderboard 查詢直接 `ORDER BY ps.final_score DESC LIMIT N`。**不要再下 LIMIT 但忘了 ORDER BY** — 那會隨機截掉高分玩家（已踩過坑）
 - [ ] `/display/board` 「展開最終榜單」按鈕在活動進行中也顯示 → 違反規格（按鈕**僅** `serverIsFinal === true` 時才出現，避免在公開看板讓觀眾 preview 終局結算未發生時的排名）
 - [ ] `/display/board` 常規模式仍渲染風雲榜 panel → 違反規格（`!isFinal` 時 panel **完全隱藏**，重點趨勢 + 行情總表 flex 自然填滿）
+- [ ] `/display/board` 終局風雲榜限制只顯示前 10 名 / 沒可見 scrollbar / 點擊 header 排序無效 → 違反規格。正確做法：(1) 撈全部、前端不 slice；(2) panel 套 `pointer-events-auto` 覆蓋 main 的 `pointer-events-none` 讓主持人可點排序 + 滾動；(3) 用 `.board-final-scroll` 顯示明顯的 amber scrollbar（不是 `.no-scrollbar`）；(4) header 副標寫「共 N 人」提示總人數
 - [ ] `restartGameCycle` 把 `BoardConfig.featured_stock_ids` 一起 reset → 違反規格（admin 設好的看板曲線商品**場次間保留**，只重置場次狀態：current_round / last_tick_at / marquee / final_scoring_triggered_at）
 - [ ] `drawDestiny` 在沒有 active 命格範本時走 `Initial*` AppSettings fallback → 違反規格（migration 0013 移除這條路徑；無範本直接 throw `CONFLICT`，要求 admin 必須先建立至少一個 active 範本）
 - [ ] 命格 / 狀態 顏色用 `karma` 值動態推算（emerald / amber / orange / rose 五色梯度）→ 違反規格（改用 `InitialValueTemplate.theme` / `KarmaBand.theme` 由 admin 設定的 6 色 enum，前端 `THEME_PALETTE` 對應）

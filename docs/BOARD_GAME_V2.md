@@ -224,6 +224,20 @@
 - **金錢**（玩家之間可互轉）、**健康** — 始終顯示，上限 100
 - **福分**、**業力** — 僅當 `ShowAllStats = true` 時顯示（或於活動結束時強制全開）。`ShowAllStats=false` 時 UI 顯示鎖定卡片 *** + lock icon，**仍保留「福分」「業力」label**（不影響玩家認知，但不顯示數值）
 - **個人歷史明細**：當活動進入「遊戲結束」狀態（大結算）時，這四張數值卡片將轉為「可點擊」的按鈕。玩家點擊單一數值（例如「金錢」），系統便會彈出該項數值在整局遊戲中的「完整交易明細」，讓玩家回顧自己的大起大落。
+- **終局結算後的玩家首頁行為**（CRITICAL）：
+  1. **頂部 banner**：紅色「終局結算已觸發，玩家寫入停用」
+  2. **不再鎖地獄畫面**：即使 `health/blessing ≤ 0` 也讓玩家正常進首頁查明細
+  3. **福分 / 業力 自動解鎖**：條件改為 `show_all_stats || final_scoring_at`，覆蓋 ShowAllStats=false 的隱藏規則（V2 §6.2 規格：玩家最終結算後可見）
+  4. **寫入按鈕 disable**：換匯所 / 銀行借貸 / 轉帳 改為灰底「已結算停用」占位（不再是 `<Link>`），避免玩家點下去才被後端 `assertNotDuringFinalScoring` 拒絕
+  5. **揭曉成績彈窗 `FinalScoreModal`**：每次回首頁自動跳出，內容含
+     - 排名大字（🥇🥈🥉 / 🏅 + 「第 N」+「/ 共 M 位玩家」）
+     - 最終分數（amber 大字）
+     - 命格 / 狀態（依 theme 套色 pill）+ 四項數值
+     - 提示「點下方四項數值卡片可查看完整明細，回顧整局的大起大落」
+     - 「不再顯示此彈窗（直到下一場活動）」checkbox
+     - 「確認」button
+  6. **彈窗持久化**：localStorage key `final_score_dismissed_<userId>`，存的值是 `final_scoring_at` 時間戳。當 admin 重啟新場次（`restartGameCycle`）後 `final_scoring_at` 變空，下一輪結算會是新時間戳，舊的 dismiss flag 自動失效，玩家會再次看到新場次的揭曉彈窗。
+  7. **getMyStats 回傳的新欄位**：`final_score`（從 `PlayerStats.final_score` 讀）、`final_rank`（單條子查詢 `COUNT(*)+1 WHERE other.final_score > my.final_score`）、`total_players`（active player COUNT）
 
 ### 福分／福報字眼可見範圍（CRITICAL）
 「福分」「福報」（同義）字眼出現規範：
@@ -392,7 +406,8 @@
 - **隱藏所有股票資訊**：重點趨勢區與大會行情總表將完全退場隱藏。
 - **展開全屏排行榜**：大富翁風雲榜會延展至 100% 滿版，並**解鎖顯示所有後台欄位**（**10 欄**：排名、姓名、**命格**、**狀態**、金錢、福份、健康、業力、重生次數、綜合最終分數）。
 - **命格 / 狀態 pill badge**：依 admin 設定的 `InitialValueTemplate.theme` / `KarmaBand.theme` 套色（amber / teal / purple / rose / sky / zinc 共 6 色），與玩家首頁卡片同色系。
-- **手動滾動檢視**：畫面預設顯示前 10 名，由現場操作員透過滑鼠或觸控版**手動向下滾動**，以揭曉後續名次（不採用自動跑馬燈）。
+- **完整名單 + 手動滾動檢視**：渲染**所有參與玩家**（不限前 10 名），由現場操作員透過滑鼠或觸控版**手動向下滾動**揭曉後續名次（不採用自動跑馬燈）。風雲榜 panel 使用**可見的 amber 色 scrollbar**（不是 `no-scrollbar`），讓主持人能直觀辨識可滾動區域。
+- **互動可用**：終局風雲榜 panel 套 `pointer-events-auto`，覆蓋 `<main>` 的 `pointer-events-none`，讓主持人可以**實際點擊欄位 header 排序**（其他區域如重點趨勢 / 行情總表仍保留 `pointer-events-none` 防誤觸）。
 - 支援與後台相同的**欄位點擊排序**功能（金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數，6 個可排序欄位），讓大會主持人可以引導現場玩家觀看各項細部數據的排行榜。
 - **名次固定原則**：畫面上的「排名」數字永遠綁定於玩家的「綜合最終分數」，當點擊其他欄位（例如：金錢）進行排序時，雖然資料列上下順序會變，但玩家身上背著的「排名數字」絕對不會改變。
 

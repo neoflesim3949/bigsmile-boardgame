@@ -209,15 +209,18 @@ export default function BoardClient({ initial, token }: Props) {
         )}
 
         {isFinal && (
-        <div className="w-full glass-panel rounded-3xl p-8 flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500">
+        <div className="w-full glass-panel rounded-3xl p-8 flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500 pointer-events-auto">
+          {/* pointer-events-auto 覆蓋 main 的 pointer-events-none，讓現場主持人可以滾動 + 點欄排序 */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500"></div>
           <h2 className={`font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 ${isFinal ? 'mb-6 text-4xl py-2' : 'mb-4 text-2xl'} uppercase tracking-widest flex justify-between items-end`}>
             <span className="text-zinc-100">🏆 風雲榜</span>
-            {isFinal && <span className="text-xl font-normal text-zinc-500 normal-case tracking-normal">
-              {data.config.final_scoring_triggered_at ? '最終結算成績' : '即時概況'}
+            {isFinal && <span className="text-xl font-normal text-zinc-500 normal-case tracking-normal flex items-center gap-3">
+              <span>共 {lbFinalRanked.length} 人</span>
+              <span className="text-zinc-700">·</span>
+              <span>{data.config.final_scoring_triggered_at ? '最終結算成績' : '即時概況'}</span>
             </span>}
           </h2>
-          <div className="flex-1 overflow-y-auto no-scrollbar">
+          <div className="flex-1 overflow-y-auto board-final-scroll">
             <table className="w-full text-left text-xl">
               {/* regular mode 14% 窄欄不需要表頭（圓圈+名字已自明），避免 sticky header 視覺脫節 */}
               {isFinal && (
@@ -357,6 +360,12 @@ export default function BoardClient({ initial, token }: Props) {
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { scrollbar-width: none; }
+        /* 終局風雲榜：明顯可見的 scrollbar，讓現場主持人知道可以捲動 */
+        .board-final-scroll::-webkit-scrollbar { width: 12px; }
+        .board-final-scroll::-webkit-scrollbar-track { background: rgba(39, 39, 42, 0.4); border-radius: 6px; }
+        .board-final-scroll::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.4); border-radius: 6px; }
+        .board-final-scroll::-webkit-scrollbar-thumb:hover { background: rgba(245, 158, 11, 0.6); }
+        .board-final-scroll { scrollbar-width: auto; scrollbar-color: rgba(245, 158, 11, 0.4) rgba(39, 39, 42, 0.4); }
       `}</style>
     </div>
   );

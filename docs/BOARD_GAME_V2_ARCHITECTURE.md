@@ -663,6 +663,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `buyStock(userId, stockId, shares)` | 買進股票（對於 `is_visible = false` 的隱藏商品，只要能傳入正確的 stockId 亦可購買） | pg tx |
 | `sellStock(userId, stockId, shares)` | 賣出股票（操作前需驗證該商品 `is_sellable = true`，若不可賣則拒絕） | pg tx |
 | `getStockMarket({ manual?: boolean, queryCode?: string })` | 取得股市商品。`queryCode` 為空時取得所有 `is_visible = true` 商品的當前價格；若帶入 `queryCode` 則精準回傳該代碼的商品（無論顯示與否，供隱藏商品購買）。`manual=true` 時共用 `last_manual_refresh_at` 60 秒節流 | 視情況 |
+| `getMyStats({ manual?: boolean })` | 取得玩家自己的 stats。新增三個衍生欄位：(1) `final_score`（直接讀 `PlayerStats.final_score`）；(2) `final_rank`（單條子查詢 `COUNT(*) + 1 WHERE other.final_score > my.final_score AND role='player' AND is_active`）；(3) `total_players`（active player 總數）。終局結算後 `PlayerHomeClient` 用這 3 欄位渲染 `FinalScoreModal` 揭曉彈窗 | 視情況 |
 
 ### 5.2 關主端
 
@@ -2085,6 +2086,12 @@ npm run lint     # ESLint 檢查
 - 終局模式（`isFinal`）→ panel 全寬展開，含 sticky thead 與所有排序欄位
 
 **終局風雲榜欄位（10 欄）**：排名 / 姓名 / **命格**（依 `destiny_theme` 套色 pill）/ **狀態**（依 `karma_band_theme` 套色 pill）/ 金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數。所有數值欄位可點 header 排序（active 顯示 amber 箭頭）；rank 永遠依 `final_score DESC` 固定，不隨當前排序欄位變化（V2.md §8 名次固定原則）。
+
+**完整名單 + 互動性**：
+- 後端 `finalLeaderboard` SQL 不下 LIMIT，撈所有 active player；前端 `lbFinalSorted.map(...)` 全數渲染（無 slice）
+- 風雲榜 panel 套 `pointer-events-auto`（覆蓋 `<main>` 的 `pointer-events-none`），讓現場主持人可以實際點擊欄位 header 排序 + 滾動；其他區域（重點趨勢 / 行情總表）仍保留 `pointer-events-none` 防誤觸
+- panel 內滾動容器套 `.board-final-scroll` class（自定 amber 色 12px scrollbar），不是 `.no-scrollbar`；讓主持人能直觀辨識「可滾動」
+- header 副標顯示「共 N 人」總人數提示，避免主持人誤以為只有畫面內幾筆
 
 ```text
 常規模式（活動進行中）：兩欄 flex 自然填滿（風雲榜 panel 隱藏）

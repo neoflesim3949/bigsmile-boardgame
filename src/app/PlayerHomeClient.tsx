@@ -20,12 +20,41 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   const [pending, startTransition] = useTransition();
   const [cooldown, setCooldown] = useState<number>(initialStats.refresh_remaining_seconds);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [showFinalModal, setShowFinalModal] = useState(false);
 
   useEffect(() => {
     if (cooldown <= 0) return;
     const id = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
     return () => clearInterval(id);
   }, [cooldown]);
+
+  // 終局結算後揭曉成績彈窗：每次回首頁都顯示，玩家可勾「不再顯示」永久關掉（localStorage 跟著 final_scoring_at 時間戳，之後若 admin 重啟新場次會自動重置）
+  useEffect(() => {
+    if (!stats.final_scoring_at) {
+      setShowFinalModal(false);
+      return;
+    }
+    try {
+      const key = `final_score_dismissed_${stats.user_id}`;
+      const dismissedAt = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
+      // 用 final_scoring_at 當 versioning — 不同場次 / admin 重啟新場次後會重設
+      if (dismissedAt !== stats.final_scoring_at) {
+        setShowFinalModal(true);
+      }
+    } catch {
+      // localStorage 不可用 → 仍顯示（保守做法）
+      setShowFinalModal(true);
+    }
+  }, [stats.final_scoring_at, stats.user_id]);
+
+  function dismissFinalModal(remember: boolean) {
+    if (remember && stats.final_scoring_at) {
+      try {
+        localStorage.setItem(`final_score_dismissed_${stats.user_id}`, stats.final_scoring_at);
+      } catch { /* ignore */ }
+    }
+    setShowFinalModal(false);
+  }
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -182,7 +211,8 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
           </p>
         </Link>
 
-        {stats.show_all_stats ? (
+        {/* 福分 / 業力：ShowAllStats=true 或 終局結算後 都顯示（V2 §6.2 規格：玩家最終結算後可見） */}
+        {(stats.show_all_stats || stats.final_scoring_at) ? (
           <>
             <Link href="/history/blessing" className="glass-panel p-4 rounded-2xl relative overflow-hidden group hover:border-teal-500/40 transition-colors">
               <div className="absolute -right-4 -bottom-4 opacity-5"><Sparkles className="w-24 h-24" /></div>
@@ -227,29 +257,39 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
         )}
       </div>
 
-      {/* Action shortcuts */}
+      {/* Action shortcuts — 終局結算後改 disabled 占位（後端 assertNotDuringFinalScoring 也會擋）*/}
       <div className="flex gap-3 mb-8">
-        <Link href="/exchange" className="flex-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px]">
-          <div className="flex items-center gap-2">
-            <RefreshCcw className="w-4 h-4" />
-            <span className="font-medium">換匯所</span>
-          </div>
-          <span className="text-[0.625rem] opacity-70">兌換金錢</span>
-        </Link>
-        <Link href="/bank" className="flex-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px]">
-          <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-blue-400" />
-            <span className="font-medium">銀行借貸</span>
-          </div>
-          <span className="text-[0.625rem] text-zinc-500">借款 {stats.bank_loan.toLocaleString()}</span>
-        </Link>
-        <Link href="/transfer" className="flex-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px]">
-          <div className="flex items-center gap-2">
-            <Send className="w-4 h-4 text-amber-400" />
-            <span className="font-medium">轉帳</span>
-          </div>
-          <span className="text-[0.625rem] text-zinc-500">玩家間匯款</span>
-        </Link>
+        {stats.final_scoring_at ? (
+          <>
+            <DisabledAction icon={<RefreshCcw className="w-4 h-4" />} label="換匯所" />
+            <DisabledAction icon={<Building2 className="w-4 h-4" />} label="銀行借貸" />
+            <DisabledAction icon={<Send className="w-4 h-4" />} label="轉帳" />
+          </>
+        ) : (
+          <>
+            <Link href="/exchange" className="flex-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px]">
+              <div className="flex items-center gap-2">
+                <RefreshCcw className="w-4 h-4" />
+                <span className="font-medium">換匯所</span>
+              </div>
+              <span className="text-[0.625rem] opacity-70">兌換金錢</span>
+            </Link>
+            <Link href="/bank" className="flex-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px]">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-blue-400" />
+                <span className="font-medium">銀行借貸</span>
+              </div>
+              <span className="text-[0.625rem] text-zinc-500">借款 {stats.bank_loan.toLocaleString()}</span>
+            </Link>
+            <Link href="/transfer" className="flex-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px]">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-amber-400" />
+                <span className="font-medium">轉帳</span>
+              </div>
+              <span className="text-[0.625rem] text-zinc-500">玩家間匯款</span>
+            </Link>
+          </>
+        )}
       </div>
 
       {/* Items */}
@@ -294,6 +334,123 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
           {toast.msg}
         </div>
       )}
+
+      {showFinalModal && stats.final_scoring_at && (
+        <FinalScoreModal stats={stats} onDismiss={dismissFinalModal} />
+      )}
+    </div>
+  );
+}
+
+function DisabledAction({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div
+      title="活動已結束，操作停用"
+      className="flex-1 bg-zinc-900/60 text-zinc-600 border border-zinc-800 rounded-xl py-3 px-2 flex flex-col items-center justify-center gap-1 min-h-[44px] cursor-not-allowed select-none"
+    >
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="font-medium">{label}</span>
+      </div>
+      <span className="text-[0.625rem]">已結算停用</span>
+    </div>
+  );
+}
+
+function FinalScoreModal({
+  stats, onDismiss,
+}: {
+  stats: PlayerStatsView;
+  onDismiss: (remember: boolean) => void;
+}) {
+  const [remember, setRemember] = useState(false);
+  const dt = themeStyle(stats.destiny_theme);
+  const kt = themeStyle(stats.karma_band_theme);
+  const rankClass = stats.final_rank === 1 ? 'text-yellow-300'
+    : stats.final_rank === 2 ? 'text-zinc-200'
+    : stats.final_rank === 3 ? 'text-amber-500'
+    : 'text-zinc-400';
+  const medalEmoji = stats.final_rank === 1 ? '🥇'
+    : stats.final_rank === 2 ? '🥈'
+    : stats.final_rank === 3 ? '🥉'
+    : '🏅';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border-2 border-amber-500/40 rounded-2xl shadow-[0_0_60px_rgba(245,158,11,0.25)] p-6 max-w-md w-full max-h-[90vh] overflow-y-auto relative">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 rounded-t-2xl"></div>
+
+        <div className="text-center mb-5">
+          <p className="text-3xl mb-2">🎉</p>
+          <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500">
+            成績揭曉
+          </h2>
+          <p className="text-xs text-zinc-500 mt-1">活動已結束，恭喜完成這場開運大富翁</p>
+        </div>
+
+        {/* 排名大字 */}
+        <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-5 text-center mb-4">
+          <p className="text-xs text-zinc-500 mb-1">你的排名</p>
+          <p className={`text-6xl font-black ${rankClass} flex items-center justify-center gap-2`}>
+            <span>{medalEmoji}</span>
+            <span>第 {stats.final_rank}</span>
+          </p>
+          <p className="text-zinc-500 text-sm mt-1">/ 共 {stats.total_players} 位玩家</p>
+          <div className="mt-4 pt-4 border-t border-zinc-800/60">
+            <p className="text-xs text-zinc-500 mb-1">最終分數</p>
+            <p className="text-4xl font-black text-amber-400">{stats.final_score.toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* 命格 / 狀態 + 四項數值 */}
+        <div className="grid grid-cols-2 gap-2 text-xs mb-4">
+          <div className={`rounded-lg p-2 border ${dt.card}`}>
+            <p className="text-zinc-500 mb-0.5">命格</p>
+            <p className={`font-bold ${dt.text}`}>{stats.destiny_name ?? '—'}</p>
+          </div>
+          <div className={`rounded-lg p-2 border ${kt.card}`}>
+            <p className="text-zinc-500 mb-0.5">狀態</p>
+            <p className={`font-bold ${kt.text}`}>{stats.karma_band_label ?? '—'}</p>
+          </div>
+          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
+            <p className="text-zinc-500 mb-0.5">金錢</p>
+            <p className="font-bold text-amber-400">${stats.money.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
+            <p className="text-zinc-500 mb-0.5">健康</p>
+            <p className="font-bold text-rose-400">{stats.health}/100</p>
+          </div>
+          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
+            <p className="text-zinc-500 mb-0.5">福分</p>
+            <p className="font-bold text-teal-400">{stats.blessing}</p>
+          </div>
+          <div className="rounded-lg p-2 bg-zinc-950 border border-zinc-800">
+            <p className="text-zinc-500 mb-0.5">業力</p>
+            <p className="font-bold text-purple-400">{stats.karma}</p>
+          </div>
+        </div>
+
+        <p className="text-[0.6875rem] text-zinc-500 text-center mb-4 italic">
+          點下方四項數值卡片可查看完整明細，回顧整局的大起大落
+        </p>
+
+        <label className="flex items-center gap-2 text-xs text-zinc-400 mb-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            className="accent-amber-500"
+          />
+          不再顯示此彈窗（直到下一場活動）
+        </label>
+
+        <button
+          onClick={() => onDismiss(remember)}
+          className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold py-3 rounded-xl transition-colors min-h-[44px] shadow-[0_0_20px_rgba(245,158,11,0.3)]"
+        >
+          確認
+        </button>
+      </div>
     </div>
   );
 }

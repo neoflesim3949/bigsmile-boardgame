@@ -230,6 +230,12 @@ export interface PlayerStatsView {
   tour_mode: boolean;
   game_enabled: boolean;
   final_scoring_at: string | null;
+  /** 預存的最終分數（每 tickRound / 改 ScoreWeight / triggerFinalScoring 重算）*/
+  final_score: number;
+  /** 自己在風雲榜的名次（由 SQL 比較同 final_score 算出，1-based）*/
+  final_rank: number;
+  /** 全部 active player 數，前端顯示「第 N / 共 M 名」*/
+  total_players: number;
   refresh_cooldown_seconds: number;
   refresh_remaining_seconds: number;
 }
@@ -280,12 +286,24 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
       karma_band_label: string | null;
       karma_band_theme: string | null;
       destiny_theme: string | null;
+      final_score: number;
+      final_rank: string;
+      total_players: string;
     }>(
+      // 自己 stats + 命格 / 業力 band JOIN + 排名（在 active players 中 final_score > 自己 → COUNT + 1）+ 總人數
       `SELECT ps.money, ps.health, ps.blessing, ps.karma, ps.rebirth_count, ps.bank_loan,
               ps.destiny_name, ps.last_manual_refresh_at,
+              ps.final_score,
               kb.label AS karma_band_label,
               kb.theme AS karma_band_theme,
-              tpl.theme AS destiny_theme
+              tpl.theme AS destiny_theme,
+              (SELECT COUNT(*) + 1 FROM "PlayerStats" ps2
+               JOIN "Account" a2 ON a2.user_id = ps2.user_id
+               WHERE a2.role = 'player' AND a2.is_active = true
+                 AND ps2.final_score > ps.final_score)::text AS final_rank,
+              (SELECT COUNT(*) FROM "PlayerStats" ps3
+               JOIN "Account" a3 ON a3.user_id = ps3.user_id
+               WHERE a3.role = 'player' AND a3.is_active = true)::text AS total_players
        FROM "PlayerStats" ps
        LEFT JOIN LATERAL (
          SELECT label, theme
@@ -335,6 +353,9 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
         tour_mode: settings.TourMode === 'true',
         game_enabled: settings.BoardGameEnabled === 'true',
         final_scoring_at: board.rows[0]?.final_scoring_triggered_at ?? null,
+        final_score: stats.final_score ?? 0,
+        final_rank: Number(stats.final_rank) || 1,
+        total_players: Number(stats.total_players) || 0,
         refresh_cooldown_seconds: cooldown,
         refresh_remaining_seconds: remaining,
       },
