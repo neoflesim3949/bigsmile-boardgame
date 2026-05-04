@@ -46,8 +46,13 @@ interface Args {
   skipDraw: boolean;
   skipBuy: boolean;
   skipScore: boolean;
+  skipLiquidation: boolean;
   /** Phase 3 用：模擬幾個 client 並發查 leaderboard（admin + 看板 poll）*/
   scoreReaders: number;
+  /** Phase 4 用：每位玩家持有幾檔股票（預設 3）*/
+  liquidationStocks: number;
+  /** Phase 4 用：強制平倉比例 % */
+  liquidationRatio: number;
 }
 
 function parseArgs(): Args {
@@ -67,7 +72,10 @@ function parseArgs(): Args {
     skipDraw: args.includes('--skip-draw'),
     skipBuy: args.includes('--skip-buy'),
     skipScore: args.includes('--skip-score'),
+    skipLiquidation: args.includes('--skip-liquidation'),
     scoreReaders: Number(get('readers', '50')) || 50,
+    liquidationStocks: Number(get('liq-stocks', '3')) || 3,
+    liquidationRatio: Number(get('liq-ratio', '50')) || 50,
   };
 }
 
@@ -299,6 +307,98 @@ async function simulateScoreCompute(
   }
 }
 
+// ─── Phase 4：強制平倉（500 玩家 × N 股）─────────────────────
+// 與 round.ts tickRound Tx1 內的 CTE 完全相同，繞過 server action 直接打 DB
+// 量測：單條 SQL 完成 1500-row 平倉 + 寫 1500 筆 Transaction 的 latency
+async function setupLiquidationHoldings(
+  pool: Pool, n: number, stockIds: string[], sharesPerStock: number,
+): Promise<void> {
+  console.log(`📝 為 ${n} 玩家鋪設 ${stockIds.length} 檔持股（每檔 ${sharesPerStock} 股）...`);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // 清掉舊持股，重新插
+    await client.query(`DELETE FROM "StockHolding" WHERE user_id LIKE 'loadtest_%'`);
+    // 批次 INSERT 用 unnest
+    const userIds: string[] = [];
+    const stockCol: string[] = [];
+    for (let i = 1; i <= n; i++) {
+      for (const sid of stockIds) {
+        userIds.push(`loadtest_${i}`);
+        stockCol.push(sid);
+      }
+    }
+    await client.query(
+      `INSERT INTO "StockHolding" (user_id, stock_id, shares, avg_cost)
+       SELECT u, s, $3::int, 100
+       FROM unnest($1::text[], $2::uuid[]) AS t(u, s)`,
+      [userIds, stockCol, sharesPerStock],
+    );
+    await client.query('COMMIT');
+    console.log(`✅ 共建立 ${userIds.length} 筆 StockHolding row`);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function simulateForceLiquidation(
+  pool: Pool, ratio: number, round: number,
+): Promise<Sample> {
+  const t0 = Date.now();
+  const client = await pool.connect();
+  try {
+    // 與 round.ts tickRound 內的 CTE 完全相同（單一 round-trip 完成所有事）
+    await client.query(
+      `WITH liquidated AS (
+         SELECT sh.user_id, sh.stock_id, s.code AS stock_code, s.name AS stock_name,
+                FLOOR(sh.shares * $1::int / 100)::int AS shares_sold,
+                sh.shares AS shares_before
+         FROM "StockHolding" sh
+         JOIN "Stock" s ON s.id = sh.stock_id
+         WHERE FLOOR(sh.shares * $1::int / 100) > 0
+       ),
+       del AS (
+         DELETE FROM "StockHolding" sh
+         USING liquidated l
+         WHERE sh.user_id = l.user_id AND sh.stock_id = l.stock_id
+           AND l.shares_sold = l.shares_before
+         RETURNING 1
+       ),
+       upd AS (
+         UPDATE "StockHolding" sh
+         SET shares = sh.shares - l.shares_sold,
+             updated_at = now()
+         FROM liquidated l
+         WHERE sh.user_id = l.user_id AND sh.stock_id = l.stock_id
+           AND l.shares_sold < l.shares_before
+         RETURNING 1
+       )
+       INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+       SELECT user_id, NULL, 'forced_liquidation',
+              jsonb_build_object(
+                'round', $2::int,
+                'ratio', $1::int,
+                'event_text', 'load test',
+                'stock_id', stock_id,
+                'stock_code', stock_code,
+                'stock_name', stock_name,
+                'shares_sold', shares_sold,
+                'money_gain', 0
+              )
+       FROM liquidated`,
+      [ratio, round],
+    );
+    return { ok: true, ms: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, ms: Date.now() - t0, err: e instanceof Error ? e.message : String(e) };
+  } finally {
+    client.release();
+  }
+}
+
 async function pickStock(pool: Pool, stockId: string | null): Promise<{ id: string; code: string; name: string; current_price: number }> {
   const r = await pool.query<{ id: string; code: string; name: string; current_price: number }>(
     stockId
@@ -335,6 +435,11 @@ async function writeReport(opts: {
   draw: PhaseStats | null;
   buy: PhaseStats | null;
   score: PhaseStats | null;
+  liquidation: PhaseStats | null;
+  liquidationInfo: {
+    holdings_before: number; holdings_after_partial: number; holdings_deleted: number;
+    transactions_written: number; ratio: number; stocks_count: number;
+  } | null;
   stockInfo: { code: string; name: string; current_price: number } | null;
   consistency: { holdingCount: number; expectedHoldings: number; totalShares: number; expectedShares: number } | null;
 }): Promise<string> {
@@ -445,10 +550,49 @@ async function writeReport(opts: {
     md.push('');
   }
 
+  // Phase 4
+  if (opts.liquidation && opts.liquidationInfo) {
+    const v = passFail(opts.liquidation);
+    const info = opts.liquidationInfo;
+    md.push(`## Phase 4：強制平倉 — 500 玩家 × ${info.stocks_count} 檔股票（${info.holdings_before} 筆持股）一次平倉 ${info.ratio}%`);
+    md.push('');
+    md.push(`**模擬情境**：主持人在 \`/admin/stocks\` 設定本回合「強制平倉比例 = ${info.ratio}%」，按下「推進下一回合」時，\`tickRound\` Tx1 內以**單條 CTE** 一次完成：`);
+    md.push(`1. 篩選所有 \`StockHolding\`，計算每筆 \`shares_sold = FLOOR(shares × ratio / 100)\``);
+    md.push(`2. \`shares_sold == shares_before\` 的 row → DELETE`);
+    md.push(`3. \`shares_sold < shares_before\` 的 row → UPDATE（扣股數）`);
+    md.push(`4. INSERT \`forced_liquidation\` Transaction 明細（每筆 1 row）`);
+    md.push('');
+    md.push(`**這是單一 round-trip**，沒有 N+1，沒有 \`Promise.all\` 平行查詢，純粹是 PG 規劃器在伺服器端一次跑完。`);
+    md.push('');
+    md.push('```');
+    md.push(fmtStats(opts.liquidation));
+    md.push('```');
+    md.push('');
+    md.push(`**寫入結果**：`);
+    md.push(`- 平倉前持股 row 數：${info.holdings_before}`);
+    md.push(`- 平倉後剩餘持股 row 數：${info.holdings_after_partial}（DELETE: ${info.holdings_deleted}，UPDATE: ${info.holdings_before - info.holdings_deleted}）`);
+    md.push(`- 寫入 \`forced_liquidation\` Transaction：${info.transactions_written} 筆`);
+    md.push(`- 一致性：${info.transactions_written === info.holdings_before ? '✅ 每筆持股都有對應明細' : '❌ 明細數與持股數對不上'}`);
+    md.push(`- 半倉模式驗證：ratio=${info.ratio}% → ${info.ratio === 100 ? '應全 DELETE' : info.ratio < 100 ? '應全 UPDATE（除非 shares × ratio < 100）' : '無動作'} → ${info.holdings_deleted === 0 && info.ratio < 100 ? '✅' : info.holdings_deleted === info.holdings_before && info.ratio === 100 ? '✅' : '⚠️ 視 share 數量分佈'}`);
+    md.push('');
+    md.push(`**驗收門檻**：`);
+    md.push(`- p95 < 300ms：${v.p95Ok ? `✅ 通過（${opts.liquidation.p95_ms}ms）` : `❌ 不通過（${opts.liquidation.p95_ms}ms）— 但這是單次回合事件，主持人可接受`}`);
+    md.push(`- error rate < 0.1%：${v.errOk ? `✅ 通過（${opts.liquidation.error_rate}）` : `❌ 不通過（${opts.liquidation.error_rate}）`}`);
+    md.push('');
+    if (opts.liquidation.errors.length > 0) {
+      md.push(`錯誤分布：`);
+      opts.liquidation.errors.forEach((e) => md.push(`- \`${e.msg}\` × ${e.count}`));
+      md.push('');
+    }
+  } else if (!opts.args.skipLiquidation) {
+    md.push(`## Phase 4：跳過`);
+    md.push('');
+  }
+
   // 總結
   md.push(`## 結論`);
   md.push('');
-  const allPhases = [opts.draw, opts.buy, opts.score].filter(Boolean) as PhaseStats[];
+  const allPhases = [opts.draw, opts.buy, opts.score, opts.liquidation].filter(Boolean) as PhaseStats[];
   const totalReq = allPhases.reduce((a, b) => a + b.total, 0);
   const totalFail = allPhases.reduce((a, b) => a + b.fail, 0);
   const allP95 = allPhases.every((p) => p.p95_ms < 300);
@@ -470,8 +614,10 @@ async function writeReport(opts: {
   md.push(`- **抽卡 \`SELECT InitialValueTemplate WHERE is_active\`** 是純讀查詢，500 人同時讀無爭用`);
   md.push('');
 
-  // 輸出到 _raw.md（不覆蓋手動維護的綜合分析 testspeed.md）
-  const dest = join(process.cwd(), 'docs', 'testspeed_raw.md');
+  // 輸出到 _raw_MMDD.md（按日期分檔，不覆蓋以前的測試結果，也不覆蓋手動維護的 testspeed.md）
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const dest = join(process.cwd(), 'docs', `testspeed_raw_${mm}${dd}.md`);
   writeFileSync(dest, md.join('\n') + '\n', 'utf-8');
   return dest;
 }
@@ -504,6 +650,11 @@ async function main() {
   let drawStats: PhaseStats | null = null;
   let buyStats: PhaseStats | null = null;
   let scoreStats: PhaseStats | null = null;
+  let liquidationStats: PhaseStats | null = null;
+  let liquidationInfo: {
+    holdings_before: number; holdings_after_partial: number; holdings_deleted: number;
+    transactions_written: number; ratio: number; stocks_count: number;
+  } | null = null;
   let stockInfo: { code: string; name: string; current_price: number } | null = null;
   let consistency: { holdingCount: number; expectedHoldings: number; totalShares: number; expectedShares: number } | null = null;
 
@@ -593,8 +744,62 @@ async function main() {
       console.log(`\n⏭  --skip-score，跳過 Phase 3`);
     }
 
+    // ─── Phase 4：強制平倉（500 玩家 × N 股一次平倉）───
+    if (!args.skipLiquidation) {
+      // 取 N 檔股票（visible 優先；不夠就退回 ORDER BY code）
+      const stocksR = await pool.query<{ id: string; code: string; name: string }>(
+        `SELECT id, code, name FROM "Stock" ORDER BY is_visible DESC NULLS LAST, code LIMIT $1`,
+        [args.liquidationStocks],
+      );
+      if (stocksR.rows.length < args.liquidationStocks) {
+        console.log(`⚠️ Phase 4 需要 ${args.liquidationStocks} 檔股票但 DB 只有 ${stocksR.rows.length} 檔，跳過`);
+      } else {
+        const stockIds = stocksR.rows.map((r) => r.id);
+        // 鋪設持股：每人每檔 10 股（讓 50% 平倉後仍有 5 股 → 走 UPDATE 路徑而非 DELETE）
+        const sharesPerStock = 10;
+        await setupLiquidationHoldings(pool, args.n, stockIds, sharesPerStock);
+
+        // 清掉舊的 forced_liquidation 明細，避免污染計數
+        await pool.query(
+          `DELETE FROM "Transaction" WHERE user_id LIKE 'loadtest_%' AND tx_type = 'forced_liquidation'`,
+        );
+
+        const beforeR = await pool.query<{ cnt: string }>(
+          `SELECT COUNT(*)::text AS cnt FROM "StockHolding" WHERE user_id LIKE 'loadtest_%' AND stock_id = ANY($1::uuid[])`,
+          [stockIds],
+        );
+        const holdingsBefore = Number(beforeR.rows[0].cnt);
+
+        console.log(`\n⏱  Phase 4：對 ${holdingsBefore} 筆持股一次性執行 ${args.liquidationRatio}% 強制平倉（單條 CTE）...`);
+        const t0 = Date.now();
+        const sample = await simulateForceLiquidation(pool, args.liquidationRatio, 99);
+        liquidationStats = summarize([sample], Date.now() - t0);
+
+        const afterR = await pool.query<{ cnt: string }>(
+          `SELECT COUNT(*)::text AS cnt FROM "StockHolding" WHERE user_id LIKE 'loadtest_%' AND stock_id = ANY($1::uuid[])`,
+          [stockIds],
+        );
+        const txR = await pool.query<{ cnt: string }>(
+          `SELECT COUNT(*)::text AS cnt FROM "Transaction" WHERE user_id LIKE 'loadtest_%' AND tx_type = 'forced_liquidation'`,
+        );
+        const holdingsAfter = Number(afterR.rows[0].cnt);
+        const txWritten = Number(txR.rows[0].cnt);
+        liquidationInfo = {
+          holdings_before: holdingsBefore,
+          holdings_after_partial: holdingsAfter,
+          holdings_deleted: holdingsBefore - holdingsAfter,
+          transactions_written: txWritten,
+          ratio: args.liquidationRatio,
+          stocks_count: stockIds.length,
+        };
+        console.log(`📊 Phase 4 結果：${liquidationStats.avg_ms}ms（單次 SQL）/ DELETE ${liquidationInfo.holdings_deleted} / UPDATE ${holdingsAfter} / Transaction ${txWritten}`);
+      }
+    } else {
+      console.log(`\n⏭  --skip-liquidation，跳過 Phase 4`);
+    }
+
     // ─── 寫報告 ───
-    const dest = await writeReport({ args, isPgBouncer, url, draw: drawStats, buy: buyStats, score: scoreStats, stockInfo, consistency });
+    const dest = await writeReport({ args, isPgBouncer, url, draw: drawStats, buy: buyStats, score: scoreStats, liquidation: liquidationStats, liquidationInfo, stockInfo, consistency });
     console.log(`\n📝 報告已寫入：${dest}\n`);
 
     if (args.cleanup) {

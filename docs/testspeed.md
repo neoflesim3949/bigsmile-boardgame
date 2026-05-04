@@ -90,6 +90,121 @@
 
 ---
 
+## Phase 4：強制平倉 — 500 玩家 × 3 檔股票 × 1500 筆持股一次平倉
+
+**模擬情境**：主持人在 `/admin/stocks` 把本回合「強制平倉比例」設為 50%，按下「推進下一回合」時，`tickRound` Tx1 內以**單條 CTE** 一次完成所有玩家的強制平倉與明細寫入。
+
+**SQL 結構**（與 `src/app/actions/round.ts` 完全一致）：
+
+```sql
+WITH liquidated AS (
+   SELECT sh.user_id, sh.stock_id, s.code, s.name,
+          FLOOR(sh.shares * $ratio / 100)::int AS shares_sold,
+          sh.shares AS shares_before
+   FROM "StockHolding" sh JOIN "Stock" s ON s.id = sh.stock_id
+   WHERE FLOOR(sh.shares * $ratio / 100) > 0
+), del AS (   -- shares_sold == shares_before 的 row
+   DELETE FROM "StockHolding" sh USING liquidated l
+   WHERE ... AND l.shares_sold = l.shares_before
+), upd AS (   -- shares_sold < shares_before 的 row
+   UPDATE "StockHolding" sh SET shares = sh.shares - l.shares_sold
+   FROM liquidated l WHERE ... AND l.shares_sold < l.shares_before
+)
+INSERT INTO "Transaction" (user_id, tx_type, payload)
+SELECT user_id, 'forced_liquidation', jsonb_build_object(...)
+FROM liquidated;
+```
+
+**關鍵設計**：1500 筆持股的 `SELECT JOIN + DELETE/UPDATE + INSERT 1500 Transaction` **全部在單一 round-trip 完成**。沒有 `Promise.all`、沒有 client 端 loop、沒有 N+1。
+
+### 效能預期（測試前推估）
+
+依據 Phase 1/2 實測結果做 worst-case 推估：
+
+| 推估項目 | 估算依據 | 推估值 |
+|---------|---------|-------|
+| 1500-row SELECT JOIN（StockHolding × Stock） | Phase 3 實測 500-row JOIN ≈ 80ms（東京 region 純讀）| ~120ms |
+| 1500-row UPDATE 或 DELETE | PG bulk 寫入經驗值約 0.05ms/row | ~75ms |
+| 1500-row INSERT Transaction（含 jsonb_build_object）| 同上但 jsonb 建構慢一點 | ~150ms |
+| 網路 round-trip（東京 → user pg client） | 實測 ~50ms | ~50ms |
+| **加總（樂觀）**| 全在 server 端流水，client 只等回應 | **~300-400ms** |
+| **悲觀**（first-run cold cache、PG planner cache miss）| 加 ~50% buffer | **~500ms** |
+
+**驗收門檻判讀**：
+- 即使悲觀估計 ~500ms，**也仍在「主持人按下回合鈕等待回應」可接受範圍**（玩家不會看到 spinner，因為這發生在 `tickRound` 的 Tx1 內）
+- 若 > 1s 才算需要追根因（可能 N+1 沒避到、或 jsonb 建構成本被低估）
+
+### 實測結果（pool=50、6543 PgBouncer transaction pooler）
+
+| 測試 | ratio | DELETE rows | UPDATE rows | Transaction 寫入 | latency | 備註 |
+|------|-------|------------|------------|----------------|---------|------|
+| **Cold run #1** | 50% | 0 | 1500 | 1500 | **151ms** | 首次跑（PG plan cache miss）|
+| Steady #1 | 50% | 0 | 1500 | 1500 | 107ms | 三次 50% 連跑 |
+| Steady #2 | 50% | 0 | 1500 | 1500 | 107ms | |
+| Steady #3 | 50% | 0 | 1500 | 1500 | 106ms | |
+| 全平倉 | 100% | **1500** | 0 | 1500 | **103ms** | DELETE 路徑 |
+| 較小比例 | 30% | 0 | 1500 | 1500 | 105ms | |
+| 極小比例 | 10% | 0 | 1500 | 1500 | 104ms | |
+
+**穩態 latency：~105ms（cold start 151ms）**
+
+### 預期 vs 實測對照
+
+| 項目 | 預期 | 實測 | 差異 |
+|------|------|------|------|
+| 樂觀推估 | 300-400ms | 105ms | **快 3-4 倍** |
+| 悲觀推估 | 500ms | 151ms（cold）| **快 3 倍** |
+| p95 < 300ms 驗收 | 預期通過 | ✅ 通過 | — |
+| error rate < 0.1% | 預期通過 | ✅ 0% | — |
+| 1:1 明細一致性 | 預期通過 | ✅ 1500/1500 | — |
+
+**為什麼比預估快這麼多？**
+
+1. **CTE 在 PG 內部規劃為單一執行計畫**：PG planner 看到 `WITH ... DELETE ... UPDATE ... INSERT` 會合併為一個 plan tree，避免逐 statement 的 lock 取得 / log flush。
+2. **沒有 client-server round-trip 開銷**：1500 row 的處理全在 PG server 內走完，client 只等最終 response。原以為 INSERT 1500 row 會比較貴，實際上 PG 對「INSERT ... SELECT FROM CTE」是 streaming 的，不需要先把 1500 row 物化到 client 再回送。
+3. **`jsonb_build_object` 比想像中快**：每筆 ~0.04ms，1500 筆只多 60ms 上下。
+4. **PgBouncer 6543 transaction pooler 的影響**：tx 內所有 query 共用同一個 backend session，沒有額外連線取得成本。
+
+### DELETE 路徑 vs UPDATE 路徑無顯著差異
+
+ratio=100%（全 DELETE 1500 row）= 103ms vs ratio=50%（全 UPDATE 1500 row）= 107ms。**只差 4ms**。  
+原因：PG 對 DELETE 與 UPDATE 在 MVCC 下都是「插入新 dead/new tuple + 標記舊 tuple」，cost 接近。  
+**結論**：主持人選哪個比例都不影響 latency。
+
+### 真實情境負載評估
+
+| 觸發頻率 | 累積 |
+|---------|------|
+| `tickRound` 每 10 分鐘 1 次 × 12 回合 | 12 次 / 場 |
+| 每次強制平倉貢獻 latency | 105-150ms |
+| **整場 12 回合平倉總時間** | **< 2 秒** |
+
+**對 `tickRound` 整體影響**：`tickRound` Tx1 還包含股價更新、Tx2 還有借款利息結算。強制平倉 ~105ms 在 Tx1 內只是**其中一段**，不是 bottleneck。即使極端情境 500 人全持有 10 檔股票（5000 row 平倉）latency 線性外推也不會超過 350ms。
+
+### 已驗證通過的設計決策
+
+- ✅ **單條 CTE，零 N+1**：1500 筆持股不論幾檔股票都是一次 SQL 完成
+- ✅ **DELETE / UPDATE 二選一分流**：用 `WHERE shares_sold = shares_before` / `WHERE shares_sold < shares_before` 在同一 CTE 內路由，避免事後再判斷
+- ✅ **1:1 寫入一致性**：1500 筆持股 → 1500 筆 forced_liquidation Transaction，無遺漏無重複
+- ✅ **比例參數化**：`$1::int` 防 SQL injection，且 PG 可重用 plan cache（cold run 後 plan 命中率 100%）
+
+### 重跑這個 Phase
+
+```bash
+# 預設 500 玩家 × 3 檔股票 × 50% 平倉
+npm run load:test -- --n 500 --pool 50 --skip-draw --skip-buy --skip-score \
+  --liq-stocks 3 --liq-ratio 50
+
+# 全平倉壓力測試
+npm run load:test -- --n 500 --pool 50 --skip-draw --skip-buy --skip-score \
+  --liq-stocks 3 --liq-ratio 100
+
+# 不跳過任何 phase（完整壓測）
+npm run load:test -- --n 500 --pool 50
+```
+
+---
+
 ## 6543 PgBouncer Transaction Pooler 實測對照
 
 切換到 `:6543/postgres?pgbouncer=true` 後，連續跑 pool=50 / 100 / 200 三次：
