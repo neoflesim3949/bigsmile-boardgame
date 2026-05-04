@@ -29,18 +29,24 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   }, [cooldown]);
 
   // 終局結算後揭曉成績彈窗：每次回首頁都顯示，玩家可勾「不再顯示」永久關掉（localStorage 跟著 final_scoring_at 時間戳，之後若 admin 重啟新場次會自動重置）
+  // 正規化時間戳：server 回傳可能是 Date / ISO string，序列化來回會格式不一致 → 統一用 ISO toISOString() 比對
+  function normalizeFinalAt(at: string | null): string | null {
+    if (!at) return null;
+    const d = new Date(at);
+    return isNaN(d.getTime()) ? String(at) : d.toISOString();
+  }
+
   useEffect(() => {
-    if (!stats.final_scoring_at) {
+    const currentAt = normalizeFinalAt(stats.final_scoring_at);
+    if (!currentAt) {
       setShowFinalModal(false);
       return;
     }
     try {
       const key = `final_score_dismissed_${stats.user_id}`;
       const dismissedAt = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
-      // 用 final_scoring_at 當 versioning — 不同場次 / admin 重啟新場次後會重設
-      if (dismissedAt !== stats.final_scoring_at) {
-        setShowFinalModal(true);
-      }
+      // 用 normalized final_scoring_at 當 versioning — 不同場次 / admin 重啟新場次後會重設
+      setShowFinalModal(dismissedAt !== currentAt);
     } catch {
       // localStorage 不可用 → 仍顯示（保守做法）
       setShowFinalModal(true);
@@ -48,9 +54,10 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
   }, [stats.final_scoring_at, stats.user_id]);
 
   function dismissFinalModal(remember: boolean) {
-    if (remember && stats.final_scoring_at) {
+    const currentAt = normalizeFinalAt(stats.final_scoring_at);
+    if (remember && currentAt) {
       try {
-        localStorage.setItem(`final_score_dismissed_${stats.user_id}`, stats.final_scoring_at);
+        localStorage.setItem(`final_score_dismissed_${stats.user_id}`, currentAt);
       } catch { /* ignore */ }
     }
     setShowFinalModal(false);
@@ -383,6 +390,7 @@ function FinalScoreModal({
     // 跟著玩家當下主題：dark 用深底、light 用白底
     const isLight = document.documentElement.dataset.theme === 'light';
     const bg = isLight ? '#ffffff' : '#18181b';
+    const filename = `開運大富翁_${stats.name}_第${stats.final_rank}名.png`;
     try {
       const { toPng } = await import('html-to-image');
       const dataUrl = await toPng(captureRef.current, {
@@ -390,9 +398,29 @@ function FinalScoreModal({
         backgroundColor: bg,
         cacheBust: true,
       });
+      // 優先嘗試 Web Share API（iOS Safari 16.4+ / 現代瀏覽器）→ 跳系統 share sheet，
+      // iPhone 上會出現「儲存圖片」「拷貝」等選項直接存相簿，比強制檔案下載 UX 好
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (typeof navigator !== 'undefined' && 'canShare' in navigator
+            && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: '我的開運大富翁成績',
+            text: `第 ${stats.final_rank} 名 / 共 ${stats.total_players} 位玩家`,
+          });
+          return; // 分享成功（或使用者取消）就結束
+        }
+      } catch (shareErr) {
+        // AbortError = 使用者取消分享，不算錯誤，靜默結束
+        if ((shareErr as { name?: string })?.name === 'AbortError') return;
+        // 其他錯誤 → 退回 fallback 直接下載
+      }
+      // Fallback：桌面瀏覽器 / 不支援 Web Share API → 直接下載 PNG 檔
       const a = document.createElement('a');
       a.href = dataUrl;
-      a.download = `開運大富翁_${stats.name}_第${stats.final_rank}名.png`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -432,29 +460,35 @@ function FinalScoreModal({
           </div>
         </div>
 
-        {/* 命格 / 狀態 + 四項數值（每格用各自色系半透明底 + base 字級，淺色模式也清晰）*/}
+        {/* 命格 / 狀態 + 四項數值（每格用各自色系半透明底 + base 字級，右下淺色 watermark icon 與玩家首頁一致）*/}
         <div className="grid grid-cols-2 gap-2 mb-4">
-          <div className={`rounded-lg p-3 border ${dt.card}`}>
+          <div className={`rounded-lg p-3 border relative overflow-hidden ${dt.card}`}>
+            <div className={`absolute -right-3 -bottom-3 opacity-10 ${dt.text}`}><Star className="w-16 h-16" /></div>
             <p className="text-zinc-500 text-sm mb-1">命格</p>
             <p className={`font-bold text-base ${dt.text}`}>{stats.destiny_name ?? '—'}</p>
           </div>
-          <div className={`rounded-lg p-3 border ${kt.card}`}>
+          <div className={`rounded-lg p-3 border relative overflow-hidden ${kt.card}`}>
+            <div className={`absolute -right-3 -bottom-3 opacity-10 ${kt.text}`}><Scale className="w-16 h-16" /></div>
             <p className="text-zinc-500 text-sm mb-1">狀態</p>
             <p className={`font-bold text-base ${kt.text}`}>{stats.karma_band_label ?? '—'}</p>
           </div>
-          <div className="rounded-lg p-3 bg-amber-500/10 border border-amber-500/30">
+          <div className="rounded-lg p-3 bg-amber-500/10 border border-amber-500/30 relative overflow-hidden">
+            <div className="absolute -right-3 -bottom-3 opacity-10 text-amber-400"><Wallet className="w-16 h-16" /></div>
             <p className="text-zinc-500 text-sm mb-1">金錢</p>
             <p className="font-bold text-base text-amber-400">${stats.money.toLocaleString()}</p>
           </div>
-          <div className="rounded-lg p-3 bg-rose-500/10 border border-rose-500/30">
+          <div className="rounded-lg p-3 bg-rose-500/10 border border-rose-500/30 relative overflow-hidden">
+            <div className="absolute -right-3 -bottom-3 opacity-10 text-rose-400"><Heart className="w-16 h-16" /></div>
             <p className="text-zinc-500 text-sm mb-1">健康</p>
             <p className="font-bold text-base text-rose-400">{stats.health}/100</p>
           </div>
-          <div className="rounded-lg p-3 bg-teal-500/10 border border-teal-500/30">
+          <div className="rounded-lg p-3 bg-teal-500/10 border border-teal-500/30 relative overflow-hidden">
+            <div className="absolute -right-3 -bottom-3 opacity-10 text-teal-400"><Sparkles className="w-16 h-16" /></div>
             <p className="text-zinc-500 text-sm mb-1">福分</p>
             <p className="font-bold text-base text-teal-400">{stats.blessing}</p>
           </div>
-          <div className="rounded-lg p-3 bg-purple-500/10 border border-purple-500/30">
+          <div className="rounded-lg p-3 bg-purple-500/10 border border-purple-500/30 relative overflow-hidden">
+            <div className="absolute -right-3 -bottom-3 opacity-10 text-purple-400"><Scale className="w-16 h-16" /></div>
             <p className="text-zinc-500 text-sm mb-1">業力</p>
             <p className="font-bold text-base text-purple-400">{stats.karma}</p>
           </div>
@@ -472,7 +506,7 @@ function FinalScoreModal({
           className="w-full mt-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 text-zinc-200 font-bold py-2.5 rounded-xl transition-colors min-h-[44px] flex items-center justify-center gap-2 border border-zinc-700"
         >
           <Download className="w-4 h-4" />
-          {downloading ? '產生圖片中…' : '下載成績圖片'}
+          {downloading ? '產生圖片中…' : '儲存 / 分享成績圖片'}
         </button>
 
         <label className="flex items-center gap-2 text-xs text-zinc-400 mt-4 mb-3 cursor-pointer">

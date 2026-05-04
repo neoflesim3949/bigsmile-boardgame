@@ -668,7 +668,10 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 **FinalScoreModal 實作細節**：
 - 截圖功能：dynamic `import('html-to-image')` 在 onClick 觸發（不增首頁初始 bundle）；`captureRef` 包**完整成績卡**（amber 邊框 + 上緣金漸層 + 標題 + 排名 + 6 格 + 提示）；checkbox / 下載 button / 確認 button 是兄弟元素而非 child，不會出現在截圖
 - **截圖跟著玩家當下主題**：讀 `document.documentElement.dataset.theme === 'light'` 決定 `toPng({ pixelRatio: 2, backgroundColor: '#ffffff' | '#18181b' })`。玩家在淺色模式 → 下載淺色版；深色模式 → 下載深色版
+- **儲存路徑**：dataURL → fetch 轉 Blob → File；先試 `navigator.canShare({ files: [file] })`，可用就 `navigator.share(...)` 開系統 share sheet（iOS 跳出原生「儲存圖片」對話框，可直接存相簿）；不可用 fallback `<a download>` 觸發下載。`AbortError`（使用者按取消）視為成功不報錯
 - DOM 結構：dialog overlay → dialog shell（單純 bg-zinc-900 + p-4 + scroll + shadow，無邊框）→ 內含 captureRef（amber 邊框成績卡）+ 兄弟 buttons
+- **6 格 watermark icon**：每格右下角放 `opacity-10 w-16 h-16` lucide icon（命格 Star、狀態 Scale、金錢 Wallet、健康 Heart、福分 Sparkles、業力 Scale），色彩跟著文字主題（`text-{color}-400`），與玩家首頁四項數值卡同樣風格但縮小（首頁用 `w-24`）
+- **localStorage 持久化容錯**：寫入 / 讀取兩端都走 `new Date(stats.final_scoring_at).toISOString()` 正規化，避免 server 回傳 Date 物件 / ISO string 序列化來回格式不一致導致比對失敗。useEffect 內必須**永遠 explicit `setShowFinalModal(boolean)`**，不能只在「該顯示時」才 setState（否則前次顯示後 re-render 卡舊值）
 - 六格 stat box 用 `bg-{amber/rose/teal/purple}-500/10 border-{...}-500/30` 半透明底（取代 `bg-zinc-950 border-zinc-800`，淺色模式幾乎跟外框同色看不清）
 - 文字字級對齊「確認」button (`text-base`)：「你的排名 / 共 N 位玩家 / 最終分數」三 label 從 text-xs / text-sm → text-base
 - 淺色模式 globals.css 補：`bg-zinc-950/70`、`bg-{color}-500/{10,15,20}`、`border-{color}-500/30`、`border-zinc-{700,800}/{50,60}`、`text-{purple,sky}-400`、`text-yellow-300` / `text-amber-500` mapping

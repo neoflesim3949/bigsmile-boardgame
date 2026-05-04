@@ -230,15 +230,18 @@
   3. **福分 / 業力 自動解鎖**：條件改為 `show_all_stats || final_scoring_at`，覆蓋 ShowAllStats=false 的隱藏規則（V2 §6.2 規格：玩家最終結算後可見）
   4. **寫入按鈕 disable**：換匯所 / 銀行借貸 / 轉帳 改為灰底「已結算停用」占位（不再是 `<Link>`），避免玩家點下去才被後端 `assertNotDuringFinalScoring` 拒絕
   5. **揭曉成績彈窗 `FinalScoreModal`**：每次回首頁自動跳出，內容含
+     - 🎉 標題「成績揭曉」+「活動已結束，恭喜完成這場開運大富翁」
      - 排名大字（🥇🥈🥉 / 🏅 + 「第 N」+「/ 共 M 位玩家」）
      - 最終分數（amber 大字）
-     - 命格 / 狀態（依 theme 套色 pill）+ 四項數值（六格用各 stat 色系半透明底，淺色模式也清晰）
+     - 命格 / 狀態（依 theme 套色 pill）+ 四項數值（六格用各 stat 色系半透明底 + 右下淺色 watermark icon `Star/Scale/Wallet/Heart/Sparkles/Scale`，跟玩家首頁同樣風格 `opacity-10`、`w-16 h-16`，不影響淺色模式可讀性）
      - 提示「點下方四項數值卡片可查看完整明細，回顧整局的大起大落」
-     - **「下載成績圖片」按鈕**：dynamic import `html-to-image`（~30KB gzip，按下才載入），用 `captureRef` 包住成績核心區域（排名 + 分數 + 命格狀態 + 六格 + 提示文字），輸出 PNG。截圖**強制深色背景 `#18181b` + `pixelRatio: 2`**（即使玩家是淺色主題截圖也清楚），檔名 `開運大富翁_<玩家名>_第N名.png`。截圖範圍**不含**checkbox / 下載按鈕 / 確認按鈕（保持成績圖簡潔）
+     - **「儲存 / 分享成績圖片」按鈕**：dynamic import `html-to-image`（~30KB gzip，按下才載入），用 `captureRef` 包住**完整成績卡**（amber 邊框 + 上緣金漸層 + 標題 + 排名 + 6 格 + 提示），輸出 PNG。**截圖跟玩家當下主題**：dark → 深底 `#18181b`、light → 白底 `#ffffff`；`pixelRatio: 2` retina 解析度；檔名 `開運大富翁_<玩家名>_第N名.png`。截圖範圍**不含**checkbox / 下載按鈕 / 確認按鈕（保持成績圖簡潔）。
+       **儲存路徑**：優先呼叫 `navigator.share({ files: [file] })` 開系統 share sheet（iOS Safari 16.4+ / 現代瀏覽器）→ iPhone 會出現「儲存圖片」「拷貝」「分享到 LINE/IG」等選項直接存相簿；不支援 Web Share API 的環境（桌面 Chrome / Firefox 等）fallback 用 `<a download>` 直接下載 PNG 檔。`AbortError`（使用者取消分享）視為成功不報錯。
      - 「不再顯示此彈窗（直到下一場活動）」checkbox
      - 「確認」button
-  6. **彈窗持久化**：localStorage key `final_score_dismissed_<userId>`，存的值是 `final_scoring_at` 時間戳。當 admin 重啟新場次（`restartGameCycle`）後 `final_scoring_at` 變空，下一輪結算會是新時間戳，舊的 dismiss flag 自動失效，玩家會再次看到新場次的揭曉彈窗。
-  7. **getMyStats 回傳的新欄位**：`final_score`（從 `PlayerStats.final_score` 讀）、`final_rank`（單條子查詢 `COUNT(*)+1 WHERE other.final_score > my.final_score`）、`total_players`（active player COUNT）
+  6. **彈窗持久化**：localStorage key `final_score_dismissed_<userId>`，存的值是 `final_scoring_at` 時間戳（**統一用 `new Date(x).toISOString()` 正規化**，避免 Date 物件 / ISO string 序列化來回格式不一致導致比對失敗）。當 admin 重啟新場次（`restartGameCycle`）後 `final_scoring_at` 變空，下一輪結算會是新時間戳，舊的 dismiss flag 自動失效，玩家會再次看到新場次的揭曉彈窗。useEffect 內判斷後**永遠 explicit `setShowFinalModal(boolean)`**（不能只在 truthy case 才 setState，否則 re-render 會卡舊值）。
+  7. **DOM 結構**：dialog overlay → dialog shell（單純 bg-zinc-900 + p-4 + scroll + shadow，無邊框）→ `captureRef`（amber 邊框成績卡，含金漸層 + 標題 + 排名 + 6 格 + 提示，自成完整視覺）→ 兄弟 buttons（下載 / checkbox / 確認，不會出現在截圖）
+  8. **getMyStats 回傳的新欄位**：`final_score`（從 `PlayerStats.final_score` 讀）、`final_rank`（單條子查詢 `COUNT(*)+1 WHERE other.final_score > my.final_score`）、`total_players`（active player COUNT）
 
 ### 福分／福報字眼可見範圍（CRITICAL）
 「福分」「福報」（同義）字眼出現規範：
