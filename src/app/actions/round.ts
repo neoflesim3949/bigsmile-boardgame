@@ -168,6 +168,57 @@ export async function tickRound(): Promise<
         );
       }
 
+      // 業力影響：依當下 karma 對應到啟用的 KarmaBand，套用四項值 delta
+      // 條件：health > 0 AND blessing > 0（地獄狀態玩家不影響）
+      // 跳過全 0 delta 的 band（如「平凡」），避免污染 Transaction
+      // health cap [0, 100]、money / blessing floor 0、karma 不限
+      // 重疊區段以 sort_order 小者優先（LATERAL LIMIT 1）
+      // 單條 CTE：affected → upd → INSERT，500 玩家也只一次 round-trip
+      await client.query(
+        `WITH affected AS (
+           SELECT ps.user_id,
+                  kb.label AS band_label,
+                  kb.money_delta, kb.health_delta, kb.blessing_delta, kb.karma_delta
+           FROM "PlayerStats" ps
+           JOIN LATERAL (
+             SELECT label, money_delta, health_delta, blessing_delta, karma_delta
+             FROM "KarmaBand"
+             WHERE is_active = true
+               AND (karma_min IS NULL OR ps.karma >= karma_min)
+               AND (karma_max IS NULL OR ps.karma <= karma_max)
+             ORDER BY sort_order ASC
+             LIMIT 1
+           ) kb ON true
+           WHERE ps.health > 0 AND ps.blessing > 0
+             AND (kb.money_delta != 0 OR kb.health_delta != 0
+                  OR kb.blessing_delta != 0 OR kb.karma_delta != 0)
+         ),
+         upd AS (
+           UPDATE "PlayerStats" ps
+           SET money    = GREATEST(0, ps.money    + a.money_delta),
+               health   = LEAST(100, GREATEST(0, ps.health + a.health_delta)),
+               blessing = GREATEST(0, ps.blessing + a.blessing_delta),
+               karma    = ps.karma + a.karma_delta,
+               updated_at = now()
+           FROM affected a
+           WHERE ps.user_id = a.user_id
+           RETURNING ps.user_id
+         )
+         INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+         SELECT a.user_id, NULL, 'karma_band_effect',
+                jsonb_build_object(
+                  'round', $1::int,
+                  'band_label', a.band_label,
+                  'money_delta', a.money_delta,
+                  'health_delta', a.health_delta,
+                  'blessing_delta', a.blessing_delta,
+                  'karma_delta', a.karma_delta
+                )
+         FROM affected a
+         JOIN upd u ON u.user_id = a.user_id`,
+        [newRound],
+      );
+
       // 推進歷史紀錄（讓 admin dashboard 撈最近 N 筆顯示「時間 | 遊戲時間」）
       // 用 BoardGameStartedAt 做 game_time 基準（admin.ts 旗標）
       const startR = await client.query<{ value: string }>(

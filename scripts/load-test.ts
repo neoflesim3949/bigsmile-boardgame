@@ -47,6 +47,7 @@ interface Args {
   skipBuy: boolean;
   skipScore: boolean;
   skipLiquidation: boolean;
+  skipKarma: boolean;
   /** Phase 3 用：模擬幾個 client 並發查 leaderboard（admin + 看板 poll）*/
   scoreReaders: number;
   /** Phase 4 用：每位玩家持有幾檔股票（預設 3）*/
@@ -73,6 +74,7 @@ function parseArgs(): Args {
     skipBuy: args.includes('--skip-buy'),
     skipScore: args.includes('--skip-score'),
     skipLiquidation: args.includes('--skip-liquidation'),
+    skipKarma: args.includes('--skip-karma'),
     scoreReaders: Number(get('readers', '50')) || 50,
     liquidationStocks: Number(get('liq-stocks', '3')) || 3,
     liquidationRatio: Number(get('liq-ratio', '50')) || 50,
@@ -399,6 +401,119 @@ async function simulateForceLiquidation(
   }
 }
 
+// ─── Phase 5：業力影響（KarmaBand）─────────────────────────────
+// 與 round.ts tickRound Tx1 內的 CTE 完全相同，繞過 server action 直接打 DB
+// 量測：對 500 玩家依當下 karma 取對應 band → 套四項 delta + 寫 Transaction
+async function setupKarmaDistribution(pool: Pool, n: number): Promise<{
+  by_band: Record<string, number>;
+  expected_affected: number;  // 預期會被寫 Transaction 的玩家數（非 0 delta band）
+}> {
+  console.log(`📝 為 ${n} 玩家鋪設 karma 分佈（覆蓋 6 個預設 band）...`);
+  // 平均分配到 6 個 band 的代表 karma 值
+  // 光明 ≤ -200 / 平凡 -199~0 / 微濁 1~99 / 渙散 100~199 / 迷失 200~299 / 墮落 ≥ 300
+  const targets = [
+    { karma: -300, label: '光明' },
+    { karma: -100, label: '平凡' },
+    { karma: 50,   label: '微濁' },
+    { karma: 150,  label: '渙散' },
+    { karma: 250,  label: '迷失' },
+    { karma: 400,  label: '墮落' },
+  ];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // 重設四項值（避免上輪 Phase 殘留），把 n 個玩家平均分 6 桶
+    const userIds: string[] = [];
+    const karmas: number[] = [];
+    for (let i = 1; i <= n; i++) {
+      userIds.push(`loadtest_${i}`);
+      karmas.push(targets[(i - 1) % targets.length].karma);
+    }
+    await client.query(
+      `UPDATE "PlayerStats" ps
+       SET money = 100000, health = 100, blessing = 50,
+           karma = t.karma, updated_at = now()
+       FROM unnest($1::text[], $2::int[]) AS t(user_id, karma)
+       WHERE ps.user_id = t.user_id`,
+      [userIds, karmas],
+    );
+    // 清掉舊的 karma_band_effect Transaction，避免污染計數
+    await client.query(
+      `DELETE FROM "Transaction" WHERE user_id LIKE 'loadtest_%' AND tx_type = 'karma_band_effect'`,
+    );
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  // 統計分佈（理論值，依預設 KarmaBand seed）
+  const each = Math.floor(n / 6);
+  const remainder = n - each * 6;
+  const dist: Record<string, number> = {};
+  targets.forEach((t, i) => {
+    dist[t.label] = each + (i < remainder ? 1 : 0);
+  });
+  // 預期會被寫 Transaction 的玩家數：非 0 delta 的 band（光明 / 渙散 / 迷失 / 墮落）
+  const nonZeroBands = ['光明', '渙散', '迷失', '墮落'];
+  const expected = nonZeroBands.reduce((sum, k) => sum + (dist[k] ?? 0), 0);
+  console.log(`✅ 分佈：${JSON.stringify(dist)}（預期 ${expected} 人會被寫 Transaction）`);
+  return { by_band: dist, expected_affected: expected };
+}
+
+async function simulateKarmaBandTick(pool: Pool, round: number): Promise<Sample> {
+  const t0 = Date.now();
+  const client = await pool.connect();
+  try {
+    // 與 round.ts tickRound 內的 CTE 完全相同
+    await client.query(
+      `WITH affected AS (
+         SELECT ps.user_id,
+                kb.label AS band_label,
+                kb.money_delta, kb.health_delta, kb.blessing_delta, kb.karma_delta
+         FROM "PlayerStats" ps
+         JOIN LATERAL (
+           SELECT label, money_delta, health_delta, blessing_delta, karma_delta
+           FROM "KarmaBand"
+           WHERE is_active = true
+             AND (karma_min IS NULL OR ps.karma >= karma_min)
+             AND (karma_max IS NULL OR ps.karma <= karma_max)
+           ORDER BY sort_order ASC
+           LIMIT 1
+         ) kb ON true
+         WHERE ps.health > 0 AND ps.blessing > 0
+           AND (kb.money_delta != 0 OR kb.health_delta != 0
+                OR kb.blessing_delta != 0 OR kb.karma_delta != 0)
+       ),
+       upd AS (
+         UPDATE "PlayerStats" ps
+         SET money    = GREATEST(0, ps.money    + a.money_delta),
+             health   = LEAST(100, GREATEST(0, ps.health + a.health_delta)),
+             blessing = GREATEST(0, ps.blessing + a.blessing_delta),
+             karma    = ps.karma + a.karma_delta,
+             updated_at = now()
+         FROM affected a
+         WHERE ps.user_id = a.user_id
+         RETURNING ps.user_id
+       )
+       INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+       SELECT a.user_id, NULL, 'karma_band_effect',
+              jsonb_build_object('round', $1::int, 'band_label', a.band_label,
+                'money_delta', a.money_delta, 'health_delta', a.health_delta,
+                'blessing_delta', a.blessing_delta, 'karma_delta', a.karma_delta)
+       FROM affected a
+       JOIN upd u ON u.user_id = a.user_id`,
+      [round],
+    );
+    return { ok: true, ms: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, ms: Date.now() - t0, err: e instanceof Error ? e.message : String(e) };
+  } finally {
+    client.release();
+  }
+}
+
 async function pickStock(pool: Pool, stockId: string | null): Promise<{ id: string; code: string; name: string; current_price: number }> {
   const r = await pool.query<{ id: string; code: string; name: string; current_price: number }>(
     stockId
@@ -439,6 +554,13 @@ async function writeReport(opts: {
   liquidationInfo: {
     holdings_before: number; holdings_after_partial: number; holdings_deleted: number;
     transactions_written: number; ratio: number; stocks_count: number;
+  } | null;
+  karma: PhaseStats | null;
+  karmaInfo: {
+    players: number;
+    distribution: Record<string, number>;
+    expected_affected: number;
+    transactions_written: number;
   } | null;
   stockInfo: { code: string; name: string; current_price: number } | null;
   consistency: { holdingCount: number; expectedHoldings: number; totalShares: number; expectedShares: number } | null;
@@ -589,10 +711,58 @@ async function writeReport(opts: {
     md.push('');
   }
 
+  // Phase 5
+  if (opts.karma && opts.karmaInfo) {
+    const v = passFail(opts.karma);
+    const info = opts.karmaInfo;
+    md.push(`## Phase 5：業力影響 — ${info.players} 玩家依當下 karma 取對應 KarmaBand 套四項 delta`);
+    md.push('');
+    md.push(`**模擬情境**：每 10 分鐘主持人按「推進下一回合」，\`tickRound\` Tx1 內以**單條 CTE** 對所有「health > 0 AND blessing > 0」玩家：`);
+    md.push(`1. LATERAL JOIN \`KarmaBand\` 找對應 band（重疊以 \`sort_order\` 小者優先 LIMIT 1）`);
+    md.push(`2. 跳過全 0 delta 的 band（如「平凡」「微濁」）`);
+    md.push(`3. UPDATE \`PlayerStats\`（health cap [0, 100]、money / blessing floor 0、karma 不限）`);
+    md.push(`4. INSERT \`karma_band_effect\` Transaction（band_label + 4 項 delta）`);
+    md.push('');
+    md.push(`**玩家分佈**（測試前鋪設，平均分到 6 個預設 band）：`);
+    md.push('');
+    md.push('| Band | karma 範例 | 玩家數 | money | health | blessing | karma | 是否寫 Transaction |');
+    md.push('|------|-----------|-------|-------|--------|----------|-------|----|');
+    md.push(`| 光明 | -300 | ${info.distribution['光明'] ?? 0} | 0 | 0 | +10 | 0 | ✅ |`);
+    md.push(`| 平凡 | -100 | ${info.distribution['平凡'] ?? 0} | 0 | 0 | 0 | 0 | ❌（全 0 跳過）|`);
+    md.push(`| 微濁 |   50 | ${info.distribution['微濁'] ?? 0} | 0 | 0 | 0 | 0 | ❌（全 0 跳過）|`);
+    md.push(`| 渙散 |  150 | ${info.distribution['渙散'] ?? 0} | -10000 | 0 | -3 | 0 | ✅ |`);
+    md.push(`| 迷失 |  250 | ${info.distribution['迷失'] ?? 0} | -2000 | 0 | -2 | 0 | ✅ |`);
+    md.push(`| 墮落 |  400 | ${info.distribution['墮落'] ?? 0} | 0 | -2 | -2 | 0 | ✅ |`);
+    md.push('');
+    md.push(`**預期 Transaction 寫入**：${info.expected_affected} 筆（光明 / 渙散 / 迷失 / 墮落 共 4 個 band 的玩家）`);
+    md.push('');
+    md.push('```');
+    md.push(fmtStats(opts.karma));
+    md.push('```');
+    md.push('');
+    md.push(`**寫入結果**：`);
+    md.push(`- 寫入 \`karma_band_effect\` Transaction：${info.transactions_written} 筆`);
+    md.push(`- 一致性：${info.transactions_written === info.expected_affected ? `✅ 等於預期 ${info.expected_affected}` : `❌ 預期 ${info.expected_affected}，實際 ${info.transactions_written}`}`);
+    md.push(`- 平凡 / 微濁 玩家被正確跳過：${info.transactions_written === info.expected_affected ? '✅' : '❌'}`);
+    md.push('');
+    md.push(`**驗收門檻**：`);
+    md.push(`- p95 < 300ms：${v.p95Ok ? `✅ 通過（${opts.karma.p95_ms}ms）` : `❌ 不通過（${opts.karma.p95_ms}ms）`}`);
+    md.push(`- error rate < 0.1%：${v.errOk ? `✅ 通過（${opts.karma.error_rate}）` : `❌ 不通過（${opts.karma.error_rate}）`}`);
+    md.push('');
+    if (opts.karma.errors.length > 0) {
+      md.push(`錯誤分布：`);
+      opts.karma.errors.forEach((e) => md.push(`- \`${e.msg}\` × ${e.count}`));
+      md.push('');
+    }
+  } else if (!opts.args.skipKarma) {
+    md.push(`## Phase 5：跳過`);
+    md.push('');
+  }
+
   // 總結
   md.push(`## 結論`);
   md.push('');
-  const allPhases = [opts.draw, opts.buy, opts.score, opts.liquidation].filter(Boolean) as PhaseStats[];
+  const allPhases = [opts.draw, opts.buy, opts.score, opts.liquidation, opts.karma].filter(Boolean) as PhaseStats[];
   const totalReq = allPhases.reduce((a, b) => a + b.total, 0);
   const totalFail = allPhases.reduce((a, b) => a + b.fail, 0);
   const allP95 = allPhases.every((p) => p.p95_ms < 300);
@@ -654,6 +824,13 @@ async function main() {
   let liquidationInfo: {
     holdings_before: number; holdings_after_partial: number; holdings_deleted: number;
     transactions_written: number; ratio: number; stocks_count: number;
+  } | null = null;
+  let karmaStats: PhaseStats | null = null;
+  let karmaInfo: {
+    players: number;
+    distribution: Record<string, number>;
+    expected_affected: number;
+    transactions_written: number;
   } | null = null;
   let stockInfo: { code: string; name: string; current_price: number } | null = null;
   let consistency: { holdingCount: number; expectedHoldings: number; totalShares: number; expectedShares: number } | null = null;
@@ -798,8 +975,33 @@ async function main() {
       console.log(`\n⏭  --skip-liquidation，跳過 Phase 4`);
     }
 
+    // ─── Phase 5：業力影響（500 玩家依當下 karma 取對應 band 套四項 delta + 寫 Transaction）───
+    if (!args.skipKarma) {
+      const dist = await setupKarmaDistribution(pool, args.n);
+
+      console.log(`\n⏱  Phase 5：對 ${args.n} 玩家執行業力影響 CTE（單條 SQL）...`);
+      const t0 = Date.now();
+      const sample = await simulateKarmaBandTick(pool, 99);
+      karmaStats = summarize([sample], Date.now() - t0);
+
+      const txR = await pool.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt FROM "Transaction"
+         WHERE user_id LIKE 'loadtest_%' AND tx_type = 'karma_band_effect'`,
+      );
+      const txWritten = Number(txR.rows[0].cnt);
+      karmaInfo = {
+        players: args.n,
+        distribution: dist.by_band,
+        expected_affected: dist.expected_affected,
+        transactions_written: txWritten,
+      };
+      console.log(`📊 Phase 5 結果：${karmaStats.avg_ms}ms（單次 SQL）/ Transaction ${txWritten} / 預期 ${dist.expected_affected}`);
+    } else {
+      console.log(`\n⏭  --skip-karma，跳過 Phase 5`);
+    }
+
     // ─── 寫報告 ───
-    const dest = await writeReport({ args, isPgBouncer, url, draw: drawStats, buy: buyStats, score: scoreStats, liquidation: liquidationStats, liquidationInfo, stockInfo, consistency });
+    const dest = await writeReport({ args, isPgBouncer, url, draw: drawStats, buy: buyStats, score: scoreStats, liquidation: liquidationStats, liquidationInfo, karma: karmaStats, karmaInfo, stockInfo, consistency });
     console.log(`\n📝 報告已寫入：${dest}\n`);
 
     if (args.cleanup) {

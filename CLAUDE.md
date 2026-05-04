@@ -207,6 +207,13 @@ assertPlayerAlive(stats)   // ← 統一 guard
   - **單條 CTE SQL** 完成 SELECT + DELETE + UPDATE + INSERT 寫紀錄（無 N+1）
   - admin 在 `/admin/stocks` 回合腳本總表「事件跑馬燈」欄前面的「強制平倉 %」input 設定（rose 色強調危險）
   - 玩家歷史明細顯示：「因『事件名』股票『BTC 比特幣』被強制售出 ×N @ $0」，金錢 delta = 0
+- **業力影響（KarmaBand）**：`/admin/settings` 命格範本下方的「業力影響」區管理。每筆 row = `{label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta, sort_order, is_active}`，`karma_min/max` 允許 NULL（不設下/上限）。`tickRound` Tx1 在強制平倉之後執行：
+  - 對 `health > 0 AND blessing > 0` 的玩家以 LATERAL JOIN 取對應 band（重疊以 `sort_order` 小者優先 LIMIT 1）
+  - 跳過 4 項 delta 全 0 的 band（如「平凡」），避免污染 Transaction
+  - cap 規則：`health = LEAST(100, GREATEST(0, ...))`、`money / blessing = GREATEST(0, ...)`、`karma` 不設上下限
+  - **單條 CTE**：affected → upd → INSERT，500 玩家也只一次 round-trip（無 N+1）
+  - 寫 `Transaction tx_type='karma_band_effect'`，payload `{round, band_label, money_delta, health_delta, blessing_delta, karma_delta}`
+  - 地獄狀態玩家不受影響；TourMode / 終局結算因 `tickRound` 已被 guard 擋
 - **即時跑馬燈廣播**：textarea + 發送 / 清除 → `publishMarquee` / `clearMarquee`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
 - **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上。**「自訂」用內建 modal**（不要用 `window.prompt` — mobile Safari / 部分桌面 Chrome 會靜默擋）。**前後端必須同時套用倍率且公式一致**：`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用 `effective_per_unit = round(money_gain_per_unit × mult)`、`total = effective_per_unit × units`（先 round 再乘，避免「顯示 +200、實際 +199」的 rounding 爭議）。**禁止**只在後端套倍率不在前端 list 套，否則玩家看到的「將獲得」與實際入帳會不一致
 

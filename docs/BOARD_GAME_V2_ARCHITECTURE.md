@@ -191,6 +191,27 @@
 > - 候選為空（極端浮點偏差）→ fallback：從所有 active templates 均勻抽（**永遠不擋人**）
 > **為什麼 `theme` 是枚舉**：Tailwind JIT 必須在編譯期看到完整的 class 字串才會生成樣式，所以後台不能存任意 hex 色碼讓前端動態套用。改採「色系名稱」由後台選擇、前端維護一份固定的 `theme → Tailwind class` palette（見 `src/app/onboarding/OnboardingClient.tsx` 的 `THEME_PALETTE`）。新增色系流程：先在 palette 加一筆，再在 schema CHECK 加值。
 
+#### `KarmaBand` — 業力影響區段（每回合自動套用）
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | UUID PK | |
+| `label` | TEXT | 狀態名稱（例：「光明」「平凡」「墮落」） |
+| `karma_min` | INTEGER NULL | 業力下限，NULL = 不設下限 |
+| `karma_max` | INTEGER NULL | 業力上限，NULL = 不設上限 |
+| `money_delta` | INTEGER DEFAULT 0 | 每回合金錢變動（負值扣除） |
+| `health_delta` | INTEGER DEFAULT 0 | 每回合健康變動（套用後 cap 在 0–100） |
+| `blessing_delta` | INTEGER DEFAULT 0 | 每回合福分變動（套用後 floor 0） |
+| `karma_delta` | INTEGER DEFAULT 0 | 每回合業力變動（無上下限） |
+| `sort_order` | INTEGER DEFAULT 0 | 重疊區段以小者優先（LATERAL LIMIT 1） |
+| `is_active` | BOOLEAN DEFAULT true | 是否納入計算 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | |
+
+索引：`(is_active, sort_order)` — 加速 LATERAL JOIN 取對應 band。
+
+> **觸發時機**：每次 `tickRound` Tx1 在強制平倉之後執行；對所有 `health > 0 AND blessing > 0` 的玩家以 LATERAL JOIN 取對應 band（重疊以 `sort_order` 小者優先 LIMIT 1）。**全 0 delta 的 band（如「平凡」）跳過**，不寫 Transaction 不浪費 row。實作為**單條 CTE**（affected → upd → INSERT），500 玩家也只一次 round-trip（無 N+1）。詳見 [§7.7](#77-主持人推進回合股價--利息結算)。
+
+> **預設 6 個 band**（migration 0007 seed，admin 可自由增刪改）：光明（≤ -200，福分 +10）、平凡（-199 ~ 0，全 0）、微濁（1 ~ 99，全 0）、渙散（100 ~ 199，金錢 -10000、福分 -3）、迷失（200 ~ 299，金錢 -2000、福分 -2）、墮落（≥ 300，健康 -2、福分 -2）。
+
 #### `QuickAction` — 關主快捷功能模組
 | 欄位 | 型別 | 說明 |
 |------|------|------|
@@ -360,7 +381,7 @@
 | `id` | BIGSERIAL PK | |
 | `user_id` | TEXT FK→Account | 受影響玩家 |
 | `actor_user_id` | TEXT NULL FK→Account | 執行者（關主／管理員／NULL=玩家自己） |
-| `tx_type` | TEXT | `quick_action` / `item_grant` / `exchange` / `transfer` / `stock_buy` / `stock_sell` / `forced_liquidation` / `settings_update` / `account_update` / `rebirth` / `bank_borrow` / `bank_repay` / `bank_interest` / `final_scoring` / `round_tick` / `danger_zone_reset` |
+| `tx_type` | TEXT | `quick_action` / `item_grant` / `exchange` / `transfer` / `stock_buy` / `stock_sell` / `forced_liquidation` / `karma_band_effect` / `settings_update` / `account_update` / `rebirth` / `bank_borrow` / `bank_repay` / `bank_interest` / `final_scoring` / `round_tick` / `danger_zone_reset` |
 | `payload` | JSONB | 各 type 的細節（金額、商品 ID、轉出/轉入對象…） |
 | `created_at` | TIMESTAMPTZ | |
 
@@ -643,9 +664,10 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `updateGameSettings(payload)` | 統一更新參數設定（活動時間、匯率、比分權重、新手參數、重生參數；批次 upsert `AppSettings`） | 無 |
 | `upsertStock(payload)` | 新增/編輯股市商品 | 無 |
 | `setStockPrice(stockId, price)` | 即時手動調整單檔股價（不等回合，自動寫入歷史） | pg tx |
-| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — **前置 guard**：Tx1 開頭驗 `BoardGameEnabled === 'true'` && `final_scoring_triggered_at IS NULL`，不符直接 `FORBIDDEN`。Tx1 流程：(a) 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory`；(b) 若 `StockRoundEvent.event_text` 有文字 → UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min`；(c) **強制平倉**（若 `force_liquidation_ratio > 0`）— 單條 CTE SQL 對所有 StockHolding 套 `FLOOR(shares × ratio / 100)`，賣價 $0 / `avg_cost` 不變 / 剩 0 則 DELETE / 每筆寫 `forced_liquidation` Transaction；(d) `BoardConfig.current_round += 1`；(e) **第 1 回合**（newRound === 1）UPSERT `AppSettings TourMode = 'false'`；(f) 寫 `round_tick` Transaction 紀錄。Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（按 balance/principal 比例算）。30 秒 debounce（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
+| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — **前置 guard**：Tx1 開頭驗 `BoardGameEnabled === 'true'` && `final_scoring_triggered_at IS NULL`，不符直接 `FORBIDDEN`。Tx1 流程：(a) 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory`；(b) 若 `StockRoundEvent.event_text` 有文字 → UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min`；(c) **強制平倉**（若 `force_liquidation_ratio > 0`）— 單條 CTE SQL 對所有 StockHolding 套 `FLOOR(shares × ratio / 100)`，賣價 $0 / `avg_cost` 不變 / 剩 0 則 DELETE / 每筆寫 `forced_liquidation` Transaction；(d) **業力影響** — 單條 CTE 對所有 `health > 0 AND blessing > 0` 玩家依當下 karma 取對應 `KarmaBand`（LATERAL LIMIT 1，重疊以 `sort_order` 小者優先），套四項 delta（health cap [0, 100]、money / blessing floor 0、karma 不限），跳過全 0 delta 的 band，每筆寫 `karma_band_effect` Transaction；(e) `BoardConfig.current_round += 1`；(f) **第 1 回合**（newRound === 1）UPSERT `AppSettings TourMode = 'false'`；(g) 寫 `round_tick` Transaction 紀錄。Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（按 balance/principal 比例算）。30 秒 debounce（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
 | `triggerFinalScoring()` | 觸發終局結算：寫 `BoardConfig.final_scoring_triggered_at = now()`；之後玩家寫入全部被 `assertNotDuringFinalScoring` 擋；看板自動切到排行榜畫面。**不可復原**（要再玩請走 `restartGameCycle`） | pg tx |
-| `restartGameCycle()` | **重啟新一場（核重置）**：在 pg tx 內清空：(1) PlayerStats 四項數值 / 命格 / 重生計數 / bank_loan / loan_updated_at / last_manual_refresh_at；(2) StockHolding / PlayerLoan / PlayerItem；(3) StockHistory / StockRoundScript / StockRoundEvent；(4) StationUsage / QuickActionUsage、Station 與 QuickAction 的 global_use_count；(5) BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at / featured_stock_ids）；(6) Event.is_active = false（保留事件定義但全部停用）。tx 外重設 AppSettings 旗標（`BoardGameEnabled` / `BoardGameStartedAt` / `CardDrawMode` / `TourMode` 全部 false/空）。**保留**：Account / Stock 商品定義（current_price 保留）/ Item / Station / QuickAction / InitialValueTemplate / ExchangeOption / BankLoanOption / Transaction 稽核。Dashboard 已計分時把「已計分」按鈕換成此功能，**前端強制 5 次確認彈窗** | pg tx |
+| `restartGameCycle()` | **重啟新一場（核重置）**：在 pg tx 內清空：(1) PlayerStats 四項數值 / 命格 / 重生計數 / bank_loan / loan_updated_at / last_manual_refresh_at；(2) StockHolding / PlayerLoan / PlayerItem；(3) StockHistory / StockRoundScript / StockRoundEvent；(4) StationUsage / QuickActionUsage、Station 與 QuickAction 的 global_use_count；(5) BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at / featured_stock_ids）；(6) Event.is_active = false（保留事件定義但全部停用）。tx 外重設 AppSettings 旗標（`BoardGameEnabled` / `BoardGameStartedAt` / `CardDrawMode` / `TourMode` 全部 false/空）。**保留**：Account / Stock 商品定義（current_price 保留）/ Item / Station / QuickAction / InitialValueTemplate / **KarmaBand** / ExchangeOption / BankLoanOption / Transaction 稽核。Dashboard 已計分時把「已計分」按鈕換成此功能，**前端強制 5 次確認彈窗** | pg tx |
+| `listKarmaBands()` / `upsertKarmaBand(payload)` / `deleteKarmaBand(id)` | 業力影響區段 CRUD（`/admin/settings` 命格範本下方的「業力影響」table 使用） | 無 |
 | `setStockPriceRule(rule)` | 設定 `AppSettings.StockPriceRule`（下回合用的漲跌規則） | 無 |
 | `resetStockHistory()` | **每場活動開場前手動觸發**：`DELETE FROM "StockHistory"`（清空股價歷史，避免上場活動的曲線殘留到本場）；同時將 `BoardConfig.current_round` 重置為 0；寫一筆 `Transaction`（`tx_type='settings_update'`，payload 註明 reset stock history）；**僅 admin 可執行，前端二次確認** | pg tx |
 | `archiveStockHistory(label)` | （可選）將當前 `StockHistory` 全表搬到 `StockHistoryArchive` 表並打標籤；用於賽後保留稽核資料 | pg tx |
@@ -809,10 +831,45 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 2. 前端顯示確認彈窗（避免誤觸），確認後呼叫 `tickRound(overrides?)`
 3. 後端**拆兩個短 pg tx**（避免單長 tx 阻塞玩家寫入）：
 
-   **Tx 1：股價更新**（很快，10 檔）
-   - 驗 `session.role === 'admin'`；驗距離 `BoardConfig.last_tick_at` ≥ 30 秒（否則回 `TICK_TOO_FAST`，整個 action 中止）
-   - 對每檔 `Stock`：依 `overrides.stockPrices` 或讀取 `AppSettings.StockPriceRule` 計算新價，UPDATE `current_price`、INSERT `StockHistory`
-   - UPDATE `BoardConfig`：`current_round += 1`、`last_tick_at = now()`
+   **Tx 1：股價更新 + 強制平倉 + 業力影響**（單一短 tx，全部單條 SQL 完成）
+   - 驗 `session.role === 'admin'`；驗 `BoardGameEnabled === 'true'` 且終局未觸發；用 atomic `UPDATE ... WHERE last_tick_at < now() - interval '30s'` 完成節流（`rowCount=0` → `TICK_RATE_LIMITED`）
+   - 對每檔 `Stock`：依 `StockRoundScript`（`fixed=0` 暴跌 / `percent=0` 鎖定 / 無腳本走 ±5%）計算新價，UPDATE `current_price`、INSERT `StockHistory`
+   - **強制平倉**：若該回合 `StockRoundEvent.force_liquidation_ratio > 0`，**單條 CTE** 完成 SELECT 1500-row JOIN + DELETE / UPDATE 二選一分流 + INSERT 1500 筆 `forced_liquidation` Transaction（與玩家持股 row 1:1）
+   - **業力影響**：對所有 `health > 0 AND blessing > 0` 的玩家，以 LATERAL JOIN 取對應 `KarmaBand`（`is_active=true` 且 `karma_min` ~ `karma_max` 命中、`sort_order` 小者優先 LIMIT 1），跳過全 0 delta 的 band，**單條 CTE** 完成 affected → upd → INSERT `karma_band_effect` Transaction：
+     ```sql
+     WITH affected AS (
+       SELECT ps.user_id, kb.label, kb.money_delta, kb.health_delta, kb.blessing_delta, kb.karma_delta
+       FROM "PlayerStats" ps
+       JOIN LATERAL (
+         SELECT label, money_delta, health_delta, blessing_delta, karma_delta
+         FROM "KarmaBand"
+         WHERE is_active = true
+           AND (karma_min IS NULL OR ps.karma >= karma_min)
+           AND (karma_max IS NULL OR ps.karma <= karma_max)
+         ORDER BY sort_order ASC LIMIT 1
+       ) kb ON true
+       WHERE ps.health > 0 AND ps.blessing > 0
+         AND (kb.money_delta != 0 OR kb.health_delta != 0
+              OR kb.blessing_delta != 0 OR kb.karma_delta != 0)
+     ),
+     upd AS (
+       UPDATE "PlayerStats" ps
+       SET money    = GREATEST(0, ps.money    + a.money_delta),
+           health   = LEAST(100, GREATEST(0, ps.health + a.health_delta)),
+           blessing = GREATEST(0, ps.blessing + a.blessing_delta),
+           karma    = ps.karma + a.karma_delta,
+           updated_at = now()
+       FROM affected a WHERE ps.user_id = a.user_id
+       RETURNING ps.user_id
+     )
+     INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+     SELECT a.user_id, NULL, 'karma_band_effect',
+            jsonb_build_object('round', $1, 'band_label', a.label,
+              'money_delta', a.money_delta, 'health_delta', a.health_delta,
+              'blessing_delta', a.blessing_delta, 'karma_delta', a.karma_delta)
+     FROM affected a JOIN upd u ON u.user_id = a.user_id;
+     ```
+   - UPDATE `BoardConfig`：`current_round += 1`、`last_tick_at = now()`、推送本回合 `StockRoundEvent.event_text` 至看板跑馬燈（5 分鐘 TTL）；第 1 回合自動 UPSERT `TourMode='false'`
 
    **Tx 2：利息結算**（一條批次 SQL，不逐筆 loop）
    - **單條** UPDATE 結算所有借款玩家：
@@ -835,9 +892,10 @@ supabase/migrations/               # SQL migration（遞增 prefix）
    - **每回合不論借多久都扣固定 `BankInterestBlessingAmount`**（不做比例計算；簡單可預期，玩家容易理解）
    - 玩家若 blessing 被扣至 ≤ 0：不額外標記，前端進頁面時即時計算為地獄狀態
 4. **設計理由**：兩 tx 拆分的好處
-   - Tx 1 只動 10 檔 `Stock` + 1 筆 `BoardConfig`，毫秒級完成；不會阻塞任何 `PlayerStats` 寫入
+   - Tx 1 包含股價（10 檔）+ `BoardConfig` + **強制平倉（單條 CTE）** + **業力影響（單條 CTE）** — 所有對 `PlayerStats` / `StockHolding` 的批次寫入都是單條 SQL，500 玩家也只各一次 round-trip。實測強制平倉 1500 row ~105ms（見 [docs/testspeed.md Phase 4](testspeed.md)）
    - Tx 2 雖然動到 `PlayerStats`，但用單條批次 SQL（不是 loop），pg 內部短時間完成；活動高峰借款玩家最多估計 200 人，單 SQL ~50 ms 量級
    - 兩 tx 之間若有玩家正在 `transferMoney` / `applyQuickAction`，最多等 Tx 2 的 50 ms，遠優於把 200 筆 UPDATE 包成單一長 tx 的「卡 1-2 秒」情境
+   - **業力影響獨立寫 Transaction** 而非 piggy-back 到 `round_tick`：玩家可在 `/history/[type]` 看到逐回合的業力 band 變化，每筆都有對應的 `band_label` 與四項 delta 細節
 5. 看板透過 Realtime 收到 `BoardConfig` UPDATE → 顯示「第 N 回合」字樣 + 主動拉一次 `getBoardData` 整合最新行情（推→拉模式，見 §11）
 6. 玩家**不會**自動收到推播；想看新狀態請玩家自行按「🔄 重新整理」（看板會作為現場提示）
 

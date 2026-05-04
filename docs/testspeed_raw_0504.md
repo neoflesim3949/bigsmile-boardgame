@@ -1,7 +1,7 @@
 # 壓測結果 — 500 人並發抽卡 + 買股票
 
 > 自動由 `scripts/load-test.ts` 產出
-> 執行時間：2026-05-04 03:50:03
+> 執行時間：2026-05-04 04:27:19
 
 ## 環境
 
@@ -33,10 +33,10 @@
 ```
 total/ok/fail: 1 / 1 / 0
    error rate: 0.00%
-   wallclock: 113 ms
-   throughput: 8.8 req/s
-   latency: avg=113ms / p50=113ms / p95=113ms / p99=113ms
-   range: 113–113 ms
+   wallclock: 122 ms
+   throughput: 8.2 req/s
+   latency: avg=122ms / p50=122ms / p95=122ms / p99=122ms
+   range: 122–122 ms
 ```
 
 **寫入結果**：
@@ -47,12 +47,51 @@ total/ok/fail: 1 / 1 / 0
 - 半倉模式驗證：ratio=50% → 應全 UPDATE（除非 shares × ratio < 100） → ✅
 
 **驗收門檻**：
-- p95 < 300ms：✅ 通過（113ms）
+- p95 < 300ms：✅ 通過（122ms）
+- error rate < 0.1%：✅ 通過（0.00%）
+
+## Phase 5：業力影響 — 500 玩家依當下 karma 取對應 KarmaBand 套四項 delta
+
+**模擬情境**：每 10 分鐘主持人按「推進下一回合」，`tickRound` Tx1 內以**單條 CTE** 對所有「health > 0 AND blessing > 0」玩家：
+1. LATERAL JOIN `KarmaBand` 找對應 band（重疊以 `sort_order` 小者優先 LIMIT 1）
+2. 跳過全 0 delta 的 band（如「平凡」「微濁」）
+3. UPDATE `PlayerStats`（health cap [0, 100]、money / blessing floor 0、karma 不限）
+4. INSERT `karma_band_effect` Transaction（band_label + 4 項 delta）
+
+**玩家分佈**（測試前鋪設，平均分到 6 個預設 band）：
+
+| Band | karma 範例 | 玩家數 | money | health | blessing | karma | 是否寫 Transaction |
+|------|-----------|-------|-------|--------|----------|-------|----|
+| 光明 | -300 | 84 | 0 | 0 | +10 | 0 | ✅ |
+| 平凡 | -100 | 84 | 0 | 0 | 0 | 0 | ❌（全 0 跳過）|
+| 微濁 |   50 | 83 | 0 | 0 | 0 | 0 | ❌（全 0 跳過）|
+| 渙散 |  150 | 83 | -10000 | 0 | -3 | 0 | ✅ |
+| 迷失 |  250 | 83 | -2000 | 0 | -2 | 0 | ✅ |
+| 墮落 |  400 | 83 | 0 | -2 | -2 | 0 | ✅ |
+
+**預期 Transaction 寫入**：333 筆（光明 / 渙散 / 迷失 / 墮落 共 4 個 band 的玩家）
+
+```
+total/ok/fail: 1 / 1 / 0
+   error rate: 0.00%
+   wallclock: 61 ms
+   throughput: 16.4 req/s
+   latency: avg=60ms / p50=60ms / p95=60ms / p99=60ms
+   range: 60–60 ms
+```
+
+**寫入結果**：
+- 寫入 `karma_band_effect` Transaction：333 筆
+- 一致性：✅ 等於預期 333
+- 平凡 / 微濁 玩家被正確跳過：✅
+
+**驗收門檻**：
+- p95 < 300ms：✅ 通過（60ms）
 - error rate < 0.1%：✅ 通過（0.00%）
 
 ## 結論
 
-本次壓測共 1 個並發 transaction，整體錯誤率 0.00%。
+本次壓測共 2 個並發 transaction，整體錯誤率 0.00%。
 
 - 系統會不會崩：**不會**（0 錯誤）
 - p95 < 300ms：全部通過 ✅

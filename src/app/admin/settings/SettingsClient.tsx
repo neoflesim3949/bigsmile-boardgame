@@ -6,9 +6,12 @@ import {
   updateAppSettings,
   upsertTemplate,
   deleteTemplate,
+  upsertKarmaBand,
+  deleteKarmaBand,
   performDangerOp,
   type SettingsPayload,
   type TemplateRow,
+  type KarmaBandRow,
   type DangerOp,
 } from '@/app/actions/admin';
 import type { AppSettingsKey } from '@/lib/settings';
@@ -32,13 +35,16 @@ interface DangerActionInfo {
 interface Props {
   initialSettings: Record<string, string>;
   initialTemplates: TemplateRow[];
+  initialKarmaBands: KarmaBandRow[];
 }
 
-export default function SettingsClient({ initialSettings, initialTemplates }: Props) {
+export default function SettingsClient({ initialSettings, initialTemplates, initialKarmaBands }: Props) {
   const [settings, setSettings] = useState<Record<string, string>>(initialSettings);
   const [templates, setTemplates] = useState<TemplateRow[]>(initialTemplates);
+  const [bands, setBands] = useState<KarmaBandRow[]>(initialKarmaBands);
   const [activeAction, setActiveAction] = useState<DangerActionInfo | null>(null);
   const [editing, setEditing] = useState<TemplateRow | null>(null);
+  const [editingBand, setEditingBand] = useState<KarmaBandRow | null>(null);
   const [savingSettings, savingSettingsTransition] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -185,6 +191,88 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
           </div>
         </section>
 
+        {/* Row 3.5: 業力影響 */}
+        <section className="glass-panel p-6 rounded-2xl space-y-5 lg:col-span-2 border-t-4 border-t-purple-700">
+          <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
+            <div>
+              <h3 className="text-lg font-bold text-zinc-200">業力影響</h3>
+              <p className="text-xs text-zinc-500 mt-1">推進回合時，依玩家當下業力對應到的區段套用四項值變動。地獄狀態（健康 / 福分 ≤ 0）玩家不受影響。</p>
+            </div>
+            <button
+              onClick={() => setEditingBand(emptyKarmaBand(bands.length))}
+              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-zinc-700 flex items-center gap-1 min-h-[40px]"
+            >
+              <Plus className="w-4 h-4" /> 新增區段
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-zinc-500 border-b border-zinc-800">
+                  <th className="py-2 pr-3">狀態</th>
+                  <th className="py-2 pr-3">業力區間</th>
+                  <th className="py-2 pr-3 text-right">金錢</th>
+                  <th className="py-2 pr-3 text-right">健康</th>
+                  <th className="py-2 pr-3 text-right">福分</th>
+                  <th className="py-2 pr-3 text-right">業力</th>
+                  <th className="py-2 pr-3 text-center">啟用</th>
+                  <th className="py-2 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bands.map((b) => (
+                  <tr key={b.id} className="border-b border-zinc-800/60 hover:bg-zinc-900/40">
+                    <td className="py-2 pr-3 font-medium text-zinc-200">{b.label}</td>
+                    <td className="py-2 pr-3 font-mono text-zinc-400">{formatBandRange(b)}</td>
+                    <DeltaCell value={b.money_delta} className="text-amber-400" />
+                    <DeltaCell value={b.health_delta} className="text-rose-400" />
+                    <DeltaCell value={b.blessing_delta} className="text-teal-400" />
+                    <DeltaCell value={b.karma_delta} className="text-purple-400" />
+                    <td className="py-2 pr-3 text-center">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={b.is_active}
+                          onChange={async (e) => {
+                            const r = await upsertKarmaBand({ ...b, is_active: e.target.checked });
+                            if (r.ok) setBands((arr) => arr.map((x) => x.id === b.id ? r.data! : x));
+                            else showToast(false, r.error?.message ?? '');
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+                      </label>
+                    </td>
+                    <td className="py-2 text-right whitespace-nowrap">
+                      <button onClick={() => setEditingBand(b)} className="p-1.5 text-zinc-400 hover:text-amber-400">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`確定刪除業力區段「${b.label}」？`)) return;
+                          const r = await deleteKarmaBand(b.id);
+                          if (r.ok) {
+                            setBands((arr) => arr.filter((x) => x.id !== b.id));
+                            showToast(true, '已刪除');
+                          } else showToast(false, r.error?.message ?? '刪除失敗');
+                        }}
+                        className="p-1.5 text-zinc-400 hover:text-rose-400"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {bands.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="py-6 text-center text-zinc-500 text-sm">尚無業力區段，按右上角「新增區段」建立。</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         {/* Row 4: 危險操作 */}
         <section className="glass-panel p-6 rounded-2xl space-y-5 lg:col-span-2 border-t-4 border-t-rose-600 bg-gradient-to-br from-rose-950/20 to-zinc-950">
           <div className="border-b border-rose-900/50 pb-3">
@@ -242,6 +330,26 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
             });
             setEditing(null);
             showToast(true, '已儲存範本');
+          }}
+        />
+      )}
+
+      {editingBand && (
+        <KarmaBandModal
+          band={editingBand}
+          onClose={() => setEditingBand(null)}
+          onSaved={(saved) => {
+            setBands((arr) => {
+              const idx = arr.findIndex((x) => x.id === saved.id);
+              if (idx >= 0) {
+                const copy = [...arr];
+                copy[idx] = saved;
+                return copy.sort((a, b) => a.sort_order - b.sort_order);
+              }
+              return [...arr, saved].sort((a, b) => a.sort_order - b.sort_order);
+            });
+            setEditingBand(null);
+            showToast(true, '已儲存業力區段');
           }}
         />
       )}
@@ -488,6 +596,164 @@ function TemplateModal({
             <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />
             啟用（納入抽卡池）
           </label>
+        </div>
+
+        {err && <p className="mt-3 text-rose-400 text-sm">{err}</p>}
+
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2 rounded-lg text-sm font-bold border border-zinc-700 min-h-[44px]">取消</button>
+          <button onClick={handleSave} disabled={busy || !draft.label} className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-zinc-950 py-2 rounded-lg text-sm font-bold min-h-[44px]">
+            {busy ? '儲存中…' : '儲存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function emptyKarmaBand(orderHint: number): KarmaBandRow {
+  return {
+    id: '',
+    label: '',
+    karma_min: null,
+    karma_max: null,
+    money_delta: 0,
+    health_delta: 0,
+    blessing_delta: 0,
+    karma_delta: 0,
+    sort_order: (orderHint + 1) * 10,
+    is_active: true,
+  };
+}
+
+function formatBandRange(b: KarmaBandRow): string {
+  if (b.karma_min === null && b.karma_max === null) return '全範圍';
+  if (b.karma_min === null) return `≤ ${b.karma_max}`;
+  if (b.karma_max === null) return `≥ ${b.karma_min}`;
+  return `${b.karma_min} ~ ${b.karma_max}`;
+}
+
+function DeltaCell({ value, className }: { value: number; className: string }) {
+  if (value === 0) {
+    return <td className="py-2 pr-3 text-right text-zinc-600 font-mono">0</td>;
+  }
+  const sign = value > 0 ? '+' : '';
+  return <td className={`py-2 pr-3 text-right font-mono font-medium ${className}`}>{sign}{value.toLocaleString()}</td>;
+}
+
+function KarmaBandModal({
+  band, onClose, onSaved,
+}: {
+  band: KarmaBandRow; onClose: () => void; onSaved: (b: KarmaBandRow) => void;
+}) {
+  const [draft, setDraft] = useState<KarmaBandRow>(band);
+  const [busy, busyTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+
+  function setNum(key: 'money_delta' | 'health_delta' | 'blessing_delta' | 'karma_delta' | 'sort_order', v: string) {
+    const n = Number(v);
+    setDraft({ ...draft, [key]: Number.isFinite(n) ? Math.trunc(n) : 0 });
+  }
+
+  function setRange(key: 'karma_min' | 'karma_max', v: string) {
+    if (v.trim() === '') {
+      setDraft({ ...draft, [key]: null });
+      return;
+    }
+    const n = Number(v);
+    setDraft({ ...draft, [key]: Number.isFinite(n) ? Math.trunc(n) : null });
+  }
+
+  function handleSave() {
+    setErr(null);
+    busyTransition(async () => {
+      const r = await upsertKarmaBand({
+        id: draft.id || undefined,
+        label: draft.label,
+        karma_min: draft.karma_min,
+        karma_max: draft.karma_max,
+        money_delta: draft.money_delta,
+        health_delta: draft.health_delta,
+        blessing_delta: draft.blessing_delta,
+        karma_delta: draft.karma_delta,
+        sort_order: draft.sort_order,
+        is_active: draft.is_active,
+      });
+      if (r.ok) onSaved(r.data!);
+      else setErr(r.error?.message ?? '儲存失敗');
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto relative">
+        <button onClick={onClose} className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300">
+          <X className="w-4 h-4" />
+        </button>
+        <h3 className="text-lg font-bold text-zinc-200 mb-4">{draft.id ? '編輯業力區段' : '新增業力區段'}</h3>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-zinc-500">狀態名稱</label>
+            <input
+              value={draft.label}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+              placeholder="例：光明者 / 平凡 / 墮落"
+              className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500">業力下限（空=不設下限）</label>
+              <input
+                type="number"
+                value={draft.karma_min ?? ''}
+                onChange={(e) => setRange('karma_min', e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500">業力上限（空=不設上限）</label>
+              <input
+                type="number"
+                value={draft.karma_max ?? ''}
+                onChange={(e) => setRange('karma_max', e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 font-mono"
+              />
+            </div>
+          </div>
+          <p className="text-[0.6875rem] text-zinc-500 -mt-2">區間：{formatBandRange(draft)}</p>
+
+          <div className="border-t border-zinc-800 pt-3">
+            <p className="text-xs text-zinc-400 mb-2">每回合影響（負值表示扣除）</p>
+            <div className="grid grid-cols-2 gap-3">
+              <SmallNum label="金錢" value={draft.money_delta} onChange={(v) => setNum('money_delta', String(v))} />
+              <SmallNum label="健康（cap 0–100）" value={draft.health_delta} onChange={(v) => setNum('health_delta', String(v))} />
+              <SmallNum label="福分（cap ≥ 0）" value={draft.blessing_delta} onChange={(v) => setNum('blessing_delta', String(v))} />
+              <SmallNum label="業力（無上下限）" value={draft.karma_delta} onChange={(v) => setNum('karma_delta', String(v))} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500">排序（小者優先）</label>
+              <input
+                type="number"
+                value={draft.sort_order}
+                onChange={(e) => setNum('sort_order', e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 font-mono"
+              />
+            </div>
+            <label className="flex items-end gap-2 text-sm text-zinc-300 pb-2">
+              <input
+                type="checkbox"
+                checked={draft.is_active}
+                onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })}
+              />
+              啟用此區段
+            </label>
+          </div>
         </div>
 
         {err && <p className="mt-3 text-rose-400 text-sm">{err}</p>}

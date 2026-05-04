@@ -2,7 +2,7 @@ import { requireRole } from '@/lib/auth';
 import { getSettings } from '@/lib/settings';
 import { query } from '@/lib/db';
 import SettingsClient from './SettingsClient';
-import type { TemplateRow } from '@/app/actions/admin';
+import type { TemplateRow, KarmaBandRow } from '@/app/actions/admin';
 
 export default async function SettingsPage() {
   await requireRole('admin');
@@ -32,12 +32,27 @@ export default async function SettingsPage() {
     'TourMode',
   ]);
 
-  const tplResult = await query<TemplateRow>(
-    `SELECT id, label, emoji, description, theme, rarity_label,
-            money, health, blessing, karma, is_active
-     FROM "InitialValueTemplate"
-     ORDER BY created_at ASC`,
-  );
+  const [tplResult, kbResult] = await Promise.all([
+    query<TemplateRow>(
+      `SELECT id, label, emoji, description, theme, rarity_label,
+              money, health, blessing, karma, is_active, draw_ratio
+       FROM "InitialValueTemplate"
+       ORDER BY created_at ASC`,
+    ),
+    query<KarmaBandRow>(
+      `SELECT id, label, karma_min, karma_max,
+              money_delta, health_delta, blessing_delta, karma_delta,
+              sort_order, is_active
+       FROM "KarmaBand"
+       ORDER BY sort_order ASC, created_at ASC`,
+    ),
+  ]);
 
-  return <SettingsClient initialSettings={settings} initialTemplates={tplResult.rows} />;
+  return (
+    <SettingsClient
+      initialSettings={settings}
+      initialTemplates={tplResult.rows}
+      initialKarmaBands={kbResult.rows}
+    />
+  );
 }

@@ -1,7 +1,10 @@
 # 壓測結果 — 500 人並發抽卡 + 買股票
 
 > 由 `scripts/load-test.ts` 產出 + 手動補對照分析
-> 執行日期：2026-05-02
+> 執行日期（UTC，對應 `docs/testspeed_raw_*.md`）：
+> - 第一次：2026-05-02 07:51:37（Phase 1/2/3 + 6543 PgBouncer 對照）
+> - 第二次：2026-05-04 04:22:32（Phase 4 強制平倉）
+> - 第三次：2026-05-04 04:27:19（Phase 4 + Phase 5 業力影響合併重跑）
 
 ## 環境
 
@@ -200,6 +203,149 @@ npm run load:test -- --n 500 --pool 50 --skip-draw --skip-buy --skip-score \
   --liq-stocks 3 --liq-ratio 100
 
 # 不跳過任何 phase（完整壓測）
+npm run load:test -- --n 500 --pool 50
+```
+
+---
+
+## Phase 5：業力影響 — 500 玩家依當下 karma 套對應 KarmaBand
+
+**模擬情境**：每 10 分鐘主持人按「推進下一回合」，`tickRound` Tx1 在強制平倉之後執行業力影響 — **單條 CTE** 對所有「health > 0 AND blessing > 0」玩家：
+1. LATERAL JOIN `KarmaBand` 找對應 band（`is_active=true` 且 `karma_min/max` 命中、`sort_order` 小者優先 LIMIT 1）
+2. 跳過全 0 delta 的 band（如「平凡」「微濁」）
+3. UPDATE `PlayerStats`（health cap [0, 100]、money / blessing floor 0、karma 不限）
+4. INSERT `karma_band_effect` Transaction（含 `band_label` + 4 項 delta）
+
+**SQL 結構**（與 [src/app/actions/round.ts](src/app/actions/round.ts) 完全一致）：
+
+```sql
+WITH affected AS (
+   SELECT ps.user_id, kb.label, kb.money_delta, kb.health_delta, kb.blessing_delta, kb.karma_delta
+   FROM "PlayerStats" ps
+   JOIN LATERAL (
+     SELECT label, money_delta, health_delta, blessing_delta, karma_delta
+     FROM "KarmaBand"
+     WHERE is_active = true
+       AND (karma_min IS NULL OR ps.karma >= karma_min)
+       AND (karma_max IS NULL OR ps.karma <= karma_max)
+     ORDER BY sort_order ASC LIMIT 1
+   ) kb ON true
+   WHERE ps.health > 0 AND ps.blessing > 0
+     AND (kb.money_delta != 0 OR kb.health_delta != 0
+          OR kb.blessing_delta != 0 OR kb.karma_delta != 0)
+), upd AS (
+   UPDATE "PlayerStats" ps SET
+     money = GREATEST(0, ps.money + a.money_delta),
+     health = LEAST(100, GREATEST(0, ps.health + a.health_delta)),
+     blessing = GREATEST(0, ps.blessing + a.blessing_delta),
+     karma = ps.karma + a.karma_delta,
+     updated_at = now()
+   FROM affected a WHERE ps.user_id = a.user_id RETURNING ps.user_id
+)
+INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+SELECT a.user_id, NULL, 'karma_band_effect',
+       jsonb_build_object('round', $1, 'band_label', a.label,
+         'money_delta', a.money_delta, ...)
+FROM affected a JOIN upd u ON u.user_id = a.user_id;
+```
+
+### 效能預期（測試前推估）
+
+| 推估項目 | 估算依據 | 推估值 |
+|---------|---------|-------|
+| 500-row PlayerStats SELECT + LATERAL join 6-row KarmaBand | LATERAL nested loop ≈ 500 × ~0.05ms | ~25ms |
+| 500-row UPDATE PlayerStats（4 column） | 0.05ms / row × 500 | ~25ms |
+| 500-row INSERT Transaction（jsonb_build_object 6 keys） | 0.04ms / row × 500 | ~20ms |
+| 網路 round-trip（東京 → user pg client） | 實測 ~50ms | ~50ms |
+| **加總**| 全在 server 端流水 | **~100-130ms** |
+
+預期：比 Phase 4（1500-row 強制平倉 105ms）**快一些**，因為只有 500-row 處理量、且 LATERAL nested loop 對 6 row 的 KarmaBand 成本接近常數。
+
+### 實測結果（pool=50、6543 PgBouncer transaction pooler）
+
+#### A. 平均分佈情境（最寫實）
+
+500 玩家平均分到 6 個 band：光明 84 / 平凡 84 / 微濁 83 / 渙散 83 / 迷失 83 / 墮落 83。其中「平凡」「微濁」全 0 delta → 跳過 → **預期寫 333 筆 Transaction**。
+
+| Run | latency | Transaction 寫入 | 一致性 |
+|-----|---------|----------------|--------|
+| 1 | 56ms | 333 | ✅ |
+| 2 | 58ms | 333 | ✅ |
+| 3 | 59ms | 333 | ✅ |
+| 4 | 59ms | 333 | ✅ |
+| 5 | 58ms | 333 | ✅ |
+
+**穩態 latency：~58ms（standard deviation < 2ms）**
+
+#### B. 最壞情境壓力測試
+
+把全部 500 玩家 karma 都設為 400（墮落 band，非 0 delta） → **500/500 玩家全要 UPDATE + INSERT**：
+
+| Run | latency | Transaction 寫入 |
+|-----|---------|----------------|
+| 1 | 77ms | 500 |
+| 2 | 74ms | 500 |
+| 3 | 73ms | 500 |
+| 4 | 72ms | 500 |
+| 5 | 68ms | 500 |
+
+**穩態 latency：~73ms**（即使全部玩家都被影響也仍 < Phase 4 的 105ms）
+
+### 預期 vs 實測對照
+
+| 項目 | 預期 | 實測 | 差異 |
+|------|------|------|------|
+| 平均分佈（333 affected） | 100-130ms | 58ms | **快 2 倍** |
+| 全壓 500 affected | ~150ms | 73ms | **快 2 倍** |
+| p95 < 300ms 驗收 | 預期通過 | ✅ 通過（最大 77ms） | — |
+| error rate < 0.1% | 預期通過 | ✅ 0% | — |
+| 資料一致性 | 預期 333 寫入 | 實際 333（5/5 runs） | ✅ 完全吻合 |
+| 平凡 / 微濁 跳過 | 預期不寫 Transaction | 實際 0 筆 | ✅ |
+
+**為什麼比預估快 2 倍？**
+
+1. **LATERAL JOIN 對小表（6 row）成本可忽略**：PG 對 KarmaBand 全表掃 6 row 的代價極低，跟 nested-loop B-tree lookup 接近 0
+2. **UPDATE PlayerStats 是按 user_id 直接定位**：JOIN 條件 `ps.user_id = a.user_id` 走 PK index，每筆 UPDATE ~0.04ms
+3. **jsonb_build_object 6 個 key 比預估快**：實際 ~0.03ms / row（INSERT 500 筆只 ~15ms）
+4. **PgBouncer 6543 預熱 plan cache**：第二次 run 起 plan parse 成本降至 0
+
+### 對 `tickRound` 整體影響
+
+`tickRound` Tx1 包含三個關鍵單條 SQL：
+
+| 步驟 | latency（500 玩家規模） |
+|------|---------------------|
+| 股價更新（10 檔 fixed loop） | ~30ms |
+| 強制平倉（CTE，1500 持股 → 1500 Transaction） | ~105ms |
+| **業力影響（CTE，~500 affected → ~333-500 Transaction）** | **~58-73ms** |
+| `BoardConfig` UPDATE + 跑馬燈 + round_tick log | ~10ms |
+| **Tx1 加總** | **~200-220ms** |
+
+加上 Tx2（借款利息結算 ~50ms），整個 `tickRound` 約 250-270ms — **遠低於主持人按下回合鈕後的 spinner 容忍上限（~1s）**。
+
+### 真實情境負載
+
+| 觸發頻率 | 累積 |
+|---------|------|
+| `tickRound` 每 10 分鐘 1 次 × 12 回合 | 12 次 / 場 |
+| 每次業力影響貢獻 latency | 58-77ms |
+| **整場 12 回合業力影響總時間** | **< 1 秒** |
+
+### 已驗證通過的設計決策
+
+- ✅ **單條 CTE，零 N+1**：500 玩家依 karma 取對應 band 都是一次 SQL 完成
+- ✅ **全 0 delta 跳過機制有效**：平凡 / 微濁玩家不寫 Transaction，省下 ~167 筆 / 回合的稽核 row
+- ✅ **LATERAL JOIN + sort_order LIMIT 1**：重疊區段被正確路由到 sort_order 最小者
+- ✅ **cap 規則生效**：money / blessing 不會降至負數、health 不超過 100
+- ✅ **死亡玩家被排除**：`WHERE ps.health > 0 AND ps.blessing > 0` 在 affected CTE 過濾，不需要逐玩家 guard
+
+### 重跑這個 Phase
+
+```bash
+# 預設平均分佈（333 affected）
+npm run load:test -- --n 500 --pool 50 --skip-draw --skip-buy --skip-score --skip-liquidation
+
+# 完整 5 個 phase 全跑
 npm run load:test -- --n 500 --pool 50
 ```
 

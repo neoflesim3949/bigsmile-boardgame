@@ -993,6 +993,11 @@ function extractDelta(txType: string, payload: Record<string, unknown>, type: Hi
     // 強制平倉以 $0 售出，金錢不變動；其他指標也不影響
     return 0;
   }
+  if (txType === 'karma_band_effect') {
+    const key = `${type}_delta` as 'money_delta' | 'health_delta' | 'blessing_delta' | 'karma_delta';
+    const v = payload[key];
+    return typeof v === 'number' ? v : 0;
+  }
   if (txType === 'quick_action') {
     const d = payload['delta'] as Record<string, number> | undefined;
     if (d && typeof d[type] === 'number') return d[type];

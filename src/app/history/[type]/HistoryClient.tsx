@@ -23,6 +23,7 @@ const TX_TYPE_LABEL: Record<string, string> = {
   stock_sell: '賣出股票',
   quick_action: '關主套用快捷',
   forced_liquidation: '強制平倉',
+  karma_band_effect: '業力影響',
   item_grant: '取得道具',
   account_update: '帳號變更',
   settings_update: '系統設定變更',
@@ -98,6 +99,12 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
       if (sold == null) return null;
       const stock = code && name ? `${code} ${name}` : (code || name || '股票');
       return `因「${event}」股票「${stock}」被強制售出 ×${sold} @ $0`;
+    }
+    case 'karma_band_effect': {
+      const band = s(payload.band_label);
+      const round = n(payload.round);
+      if (!band) return null;
+      return round != null ? `第 ${round} 回合處於「${band}」狀態` : `處於「${band}」狀態`;
     }
     case 'exchange': {
       const units = n(payload.units);

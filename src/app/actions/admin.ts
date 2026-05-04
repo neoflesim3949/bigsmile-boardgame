@@ -128,6 +128,98 @@ export async function deleteTemplate(id: string): Promise<ActionResult<null>> {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 業力影響 KarmaBand CRUD
+// ─────────────────────────────────────────────────────────────
+
+const karmaBandSchema = z.object({
+  id: z.uuid().optional(),
+  label: z.string().min(1).max(40),
+  karma_min: z.number().int().nullable(),
+  karma_max: z.number().int().nullable(),
+  money_delta: z.number().int(),
+  health_delta: z.number().int(),
+  blessing_delta: z.number().int(),
+  karma_delta: z.number().int(),
+  sort_order: z.number().int().min(0).max(9999),
+  is_active: z.boolean(),
+});
+export type KarmaBandPayload = z.infer<typeof karmaBandSchema>;
+export interface KarmaBandRow extends KarmaBandPayload {
+  id: string;
+}
+
+export async function listKarmaBands(): Promise<ActionResult<KarmaBandRow[]>> {
+  try {
+    await requireRole('admin');
+    const r = await query<KarmaBandRow>(
+      `SELECT id, label, karma_min, karma_max,
+              money_delta, health_delta, blessing_delta, karma_delta,
+              sort_order, is_active
+       FROM "KarmaBand"
+       ORDER BY sort_order ASC, created_at ASC`,
+    );
+    return ok(r.rows);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function upsertKarmaBand(payload: KarmaBandPayload): Promise<ActionResult<KarmaBandRow>> {
+  try {
+    await requireRole('admin');
+    const data = karmaBandSchema.parse(payload);
+    if (data.karma_min !== null && data.karma_max !== null && data.karma_min > data.karma_max) {
+      throw new ActionError('INVALID_INPUT', '業力下限不能大於上限');
+    }
+    if (data.id) {
+      const r = await query<KarmaBandRow>(
+        `UPDATE "KarmaBand"
+         SET label=$1, karma_min=$2, karma_max=$3,
+             money_delta=$4, health_delta=$5, blessing_delta=$6, karma_delta=$7,
+             sort_order=$8, is_active=$9, updated_at=now()
+         WHERE id=$10
+         RETURNING id, label, karma_min, karma_max,
+                   money_delta, health_delta, blessing_delta, karma_delta,
+                   sort_order, is_active`,
+        [data.label, data.karma_min, data.karma_max,
+         data.money_delta, data.health_delta, data.blessing_delta, data.karma_delta,
+         data.sort_order, data.is_active, data.id],
+      );
+      if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '業力區段不存在');
+      revalidatePath('/admin/settings');
+      return ok(r.rows[0]);
+    }
+    const r = await query<KarmaBandRow>(
+      `INSERT INTO "KarmaBand"
+         (label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, label, karma_min, karma_max,
+                 money_delta, health_delta, blessing_delta, karma_delta,
+                 sort_order, is_active`,
+      [data.label, data.karma_min, data.karma_max,
+       data.money_delta, data.health_delta, data.blessing_delta, data.karma_delta,
+       data.sort_order, data.is_active],
+    );
+    revalidatePath('/admin/settings');
+    return ok(r.rows[0]);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteKarmaBand(id: string): Promise<ActionResult<null>> {
+  try {
+    await requireRole('admin');
+    if (!z.uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
+    await query(`DELETE FROM "KarmaBand" WHERE id = $1`, [id]);
+    revalidatePath('/admin/settings');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Danger Zone（危險操作 — 三次確認在前端，後端必驗 admin）
 // ─────────────────────────────────────────────────────────────
 
