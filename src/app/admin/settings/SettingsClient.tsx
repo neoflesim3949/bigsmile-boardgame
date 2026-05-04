@@ -19,6 +19,15 @@ import type { AppSettingsKey } from '@/lib/settings';
 const THEME_OPTIONS = ['amber', 'teal', 'purple', 'rose', 'sky', 'zinc'] as const;
 type Theme = (typeof THEME_OPTIONS)[number];
 
+const THEME_SWATCH: Record<Theme, string> = {
+  amber: 'bg-amber-500',
+  teal: 'bg-teal-500',
+  purple: 'bg-purple-500',
+  rose: 'bg-rose-500',
+  sky: 'bg-sky-500',
+  zinc: 'bg-zinc-500',
+};
+
 const CONFIRM_STEPS = [
   '你確定要執行此操作嗎？',
   '此操作無法復原，請再次確認。',
@@ -667,6 +676,7 @@ function emptyKarmaBand(orderHint: number): KarmaBandRow {
     health_delta: 0,
     blessing_delta: 0,
     karma_delta: 0,
+    theme: 'zinc',
     sort_order: (orderHint + 1) * 10,
     is_active: true,
   };
@@ -722,6 +732,7 @@ function KarmaBandModal({
         health_delta: draft.health_delta,
         blessing_delta: draft.blessing_delta,
         karma_delta: draft.karma_delta,
+        theme: draft.theme,
         sort_order: draft.sort_order,
         is_active: draft.is_active,
       });
@@ -778,6 +789,30 @@ function KarmaBandModal({
               <SmallNum label="健康（cap 0–100）" value={draft.health_delta} onChange={(v) => setNum('health_delta', String(v))} />
               <SmallNum label="福分（cap ≥ 0）" value={draft.blessing_delta} onChange={(v) => setNum('blessing_delta', String(v))} />
               <SmallNum label="業力（無上下限）" value={draft.karma_delta} onChange={(v) => setNum('karma_delta', String(v))} />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-zinc-500">色系（玩家首頁狀態卡的卡片色）</label>
+            <div className="flex gap-1.5 mt-1 flex-wrap">
+              {THEME_OPTIONS.map((th) => {
+                const swatchCls = THEME_SWATCH[th] ?? 'bg-zinc-700';
+                return (
+                  <button
+                    key={th}
+                    type="button"
+                    onClick={() => setDraft({ ...draft, theme: th })}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border transition-colors ${
+                      draft.theme === th
+                        ? 'border-zinc-300 bg-zinc-800'
+                        : 'border-zinc-700 bg-zinc-950 hover:border-zinc-500'
+                    }`}
+                  >
+                    <span className={`w-3 h-3 rounded-full ${swatchCls}`} />
+                    <span className="text-xs text-zinc-300">{th}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

@@ -43,7 +43,7 @@ export default async function SettingsPage() {
     query<KarmaBandRow>(
       `SELECT id, label, karma_min, karma_max,
               money_delta, health_delta, blessing_delta, karma_delta,
-              sort_order, is_active
+              theme, sort_order, is_active
        FROM "KarmaBand"
        ORDER BY sort_order ASC, created_at ASC`,
     ),

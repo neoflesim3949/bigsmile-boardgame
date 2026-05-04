@@ -140,6 +140,7 @@ const karmaBandSchema = z.object({
   health_delta: z.number().int(),
   blessing_delta: z.number().int(),
   karma_delta: z.number().int(),
+  theme: themeEnum,
   sort_order: z.number().int().min(0).max(9999),
   is_active: z.boolean(),
 });
@@ -154,7 +155,7 @@ export async function listKarmaBands(): Promise<ActionResult<KarmaBandRow[]>> {
     const r = await query<KarmaBandRow>(
       `SELECT id, label, karma_min, karma_max,
               money_delta, health_delta, blessing_delta, karma_delta,
-              sort_order, is_active
+              theme, sort_order, is_active
        FROM "KarmaBand"
        ORDER BY sort_order ASC, created_at ASC`,
     );
@@ -176,14 +177,14 @@ export async function upsertKarmaBand(payload: KarmaBandPayload): Promise<Action
         `UPDATE "KarmaBand"
          SET label=$1, karma_min=$2, karma_max=$3,
              money_delta=$4, health_delta=$5, blessing_delta=$6, karma_delta=$7,
-             sort_order=$8, is_active=$9, updated_at=now()
-         WHERE id=$10
+             theme=$8, sort_order=$9, is_active=$10, updated_at=now()
+         WHERE id=$11
          RETURNING id, label, karma_min, karma_max,
                    money_delta, health_delta, blessing_delta, karma_delta,
-                   sort_order, is_active`,
+                   theme, sort_order, is_active`,
         [data.label, data.karma_min, data.karma_max,
          data.money_delta, data.health_delta, data.blessing_delta, data.karma_delta,
-         data.sort_order, data.is_active, data.id],
+         data.theme, data.sort_order, data.is_active, data.id],
       );
       if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '業力區段不存在');
       revalidatePath('/admin/settings');
@@ -191,14 +192,15 @@ export async function upsertKarmaBand(payload: KarmaBandPayload): Promise<Action
     }
     const r = await query<KarmaBandRow>(
       `INSERT INTO "KarmaBand"
-         (label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta, sort_order, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         (label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta,
+          theme, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id, label, karma_min, karma_max,
                  money_delta, health_delta, blessing_delta, karma_delta,
-                 sort_order, is_active`,
+                 theme, sort_order, is_active`,
       [data.label, data.karma_min, data.karma_max,
        data.money_delta, data.health_delta, data.blessing_delta, data.karma_delta,
-       data.sort_order, data.is_active],
+       data.theme, data.sort_order, data.is_active],
     );
     revalidatePath('/admin/settings');
     return ok(r.rows[0]);

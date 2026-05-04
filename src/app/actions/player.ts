@@ -224,8 +224,12 @@ export interface PlayerStatsView {
   user_id: string;
   name: string;
   destiny_name: string | null;
+  /** 命格對應 InitialValueTemplate.theme（用於玩家首頁命格卡的色系；fallback 'amber'）*/
+  destiny_theme: string;
   /** 當前對應的 KarmaBand label（依 karma 落點 LATERAL join；無對應 band 為 null） */
   karma_band_label: string | null;
+  /** 對應 KarmaBand.theme（fallback 'zinc'）*/
+  karma_band_theme: string;
   money: number;
   health: number;
   blessing: number;
@@ -286,19 +290,24 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
       rebirth_count: number; bank_loan: number; destiny_name: string | null;
       last_manual_refresh_at: string | null;
       karma_band_label: string | null;
+      karma_band_theme: string | null;
+      destiny_theme: string | null;
     }>(
       `SELECT ps.money, ps.health, ps.blessing, ps.karma, ps.rebirth_count, ps.bank_loan,
               ps.destiny_name, ps.last_manual_refresh_at,
-              kb.label AS karma_band_label
+              kb.label AS karma_band_label,
+              kb.theme AS karma_band_theme,
+              tpl.theme AS destiny_theme
        FROM "PlayerStats" ps
        LEFT JOIN LATERAL (
-         SELECT label
+         SELECT label, theme
          FROM "KarmaBand"
          WHERE is_active = true
            AND (karma_min IS NULL OR ps.karma >= karma_min)
            AND (karma_max IS NULL OR ps.karma <= karma_max)
          ORDER BY sort_order ASC LIMIT 1
        ) kb ON true
+       LEFT JOIN "InitialValueTemplate" tpl ON tpl.label = ps.destiny_name
        WHERE ps.user_id = $1`,
       [session.userId],
     );
@@ -324,7 +333,9 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
         user_id: session.userId,
         name: session.name,
         destiny_name: stats.destiny_name,
+        destiny_theme: stats.destiny_theme ?? 'amber',
         karma_band_label: stats.karma_band_label,
+        karma_band_theme: stats.karma_band_theme ?? 'zinc',
         money: stats.money,
         health: stats.health,
         blessing: stats.blessing,

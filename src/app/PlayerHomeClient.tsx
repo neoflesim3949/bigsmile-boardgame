@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, useTransition, useEffect } from 'react';
 import {
-  Wallet, Heart, Sparkles, Scale, RefreshCcw, Package, TrendingUp,
+  Wallet, Heart, Sparkles, Scale, Star, RefreshCcw, Package, TrendingUp,
   Building2, Lock, Settings, Send, Skull, AlertCircle, CheckCircle2,
 } from 'lucide-react';
 import QrButton from '@/components/QrButton';
@@ -123,26 +123,38 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
         </div>
       )}
 
-      {/* 命格 + 狀態（永遠顯示）*/}
+      {/* 命格 + 狀態（永遠顯示，依各自 theme 套色）*/}
       <div className="grid grid-cols-2 gap-3 mb-3">
-        <div className="glass-panel p-4 rounded-2xl">
-          <div className="flex items-center gap-2 mb-1.5 text-zinc-400">
-            <span className="text-amber-400">🀄</span>
-            <span className="text-sm font-medium">命格</span>
-          </div>
-          <p className="text-xl font-bold text-amber-400 truncate">
-            {stats.destiny_name ?? '—'}
-          </p>
-        </div>
-        <div className={`glass-panel p-4 rounded-2xl border ${karmaBandStyle(stats.karma)}`}>
-          <div className="flex items-center gap-2 mb-1.5 text-zinc-400">
-            <Scale className="w-4 h-4" />
-            <span className="text-sm font-medium">狀態</span>
-          </div>
-          <p className="text-xl font-bold truncate">
-            {stats.karma_band_label ?? '—'}
-          </p>
-        </div>
+        {(() => {
+          const dt = themeStyle(stats.destiny_theme);
+          return (
+            <div className={`glass-panel p-4 rounded-2xl relative overflow-hidden border ${dt.card}`}>
+              <div className={`absolute -right-4 -bottom-4 opacity-10 ${dt.text}`}><Star className="w-24 h-24" /></div>
+              <div className="flex items-center gap-2 mb-1.5 text-zinc-400">
+                <Star className={`w-4 h-4 ${dt.text}`} />
+                <span className="text-sm font-medium">命格</span>
+              </div>
+              <p className={`text-xl font-bold truncate ${dt.text}`}>
+                {stats.destiny_name ?? '—'}
+              </p>
+            </div>
+          );
+        })()}
+        {(() => {
+          const kt = themeStyle(stats.karma_band_theme);
+          return (
+            <div className={`glass-panel p-4 rounded-2xl relative overflow-hidden border ${kt.card}`}>
+              <div className={`absolute -right-4 -bottom-4 opacity-10 ${kt.text}`}><Scale className="w-24 h-24" /></div>
+              <div className="flex items-center gap-2 mb-1.5 text-zinc-400">
+                <Scale className={`w-4 h-4 ${kt.text}`} />
+                <span className="text-sm font-medium">狀態</span>
+              </div>
+              <p className={`text-xl font-bold truncate ${kt.text}`}>
+                {stats.karma_band_label ?? '—'}
+              </p>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 4 stat cards */}
@@ -295,17 +307,19 @@ function UserIcon() {
 }
 
 /**
- * 依當前 karma 值給 KarmaBand badge 配色（不依賴 admin 自訂的 label，所以 admin 重新命名也能套到合理顏色）
- * - karma ≤ -100：emerald（光明傾向）
- * - -99 ~ 99：zinc（中性）
- * - 100 ~ 199：amber（警戒）
- * - 200 ~ 299：orange（嚴重）
- * - ≥ 300：rose（最墮落）
+ * 6 色系 palette — 玩家首頁命格 / 狀態卡通用
+ * - 命格卡讀 stats.destiny_theme（從 InitialValueTemplate.theme，fallback 'amber'）
+ * - 狀態卡讀 stats.karma_band_theme（從 KarmaBand.theme，fallback 'zinc'）
+ * - admin 在 /admin/settings 命格範本 / 業力影響 各自設 theme
  */
-function karmaBandStyle(karma: number): string {
-  if (karma <= -100) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
-  if (karma >= 300) return 'bg-rose-500/15 text-rose-400 border-rose-500/30';
-  if (karma >= 200) return 'bg-orange-500/15 text-orange-400 border-orange-500/30';
-  if (karma >= 100) return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
-  return 'bg-zinc-700/40 text-zinc-300 border-zinc-600/40';
+const THEME_PALETTE: Record<string, { card: string; text: string }> = {
+  amber: { card: 'bg-amber-500/10 border-amber-500/30', text: 'text-amber-400' },
+  teal: { card: 'bg-teal-500/10 border-teal-500/30', text: 'text-teal-400' },
+  purple: { card: 'bg-purple-500/10 border-purple-500/30', text: 'text-purple-400' },
+  rose: { card: 'bg-rose-500/10 border-rose-500/30', text: 'text-rose-400' },
+  sky: { card: 'bg-sky-500/10 border-sky-500/30', text: 'text-sky-400' },
+  zinc: { card: 'bg-zinc-700/30 border-zinc-600/40', text: 'text-zinc-200' },
+};
+function themeStyle(theme: string): { card: string; text: string } {
+  return THEME_PALETTE[theme] ?? THEME_PALETTE.zinc;
 }
