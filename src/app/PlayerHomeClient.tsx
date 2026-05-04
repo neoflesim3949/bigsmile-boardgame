@@ -380,13 +380,14 @@ function FinalScoreModal({
   async function handleDownload() {
     if (!captureRef.current || downloading) return;
     setDownloading(true);
+    // 跟著玩家當下主題：dark 用深底、light 用白底
+    const isLight = document.documentElement.dataset.theme === 'light';
+    const bg = isLight ? '#ffffff' : '#18181b';
     try {
-      // Dynamic import — html-to-image 只在使用者點下載才載入，不影響首頁初始 bundle
       const { toPng } = await import('html-to-image');
-      // 強制深色背景 + 2x DPI，避免 user 使用淺色主題時截圖背景太淡
       const dataUrl = await toPng(captureRef.current, {
         pixelRatio: 2,
-        backgroundColor: '#18181b',
+        backgroundColor: bg,
         cacheBust: true,
       });
       const a = document.createElement('a');
@@ -404,11 +405,11 @@ function FinalScoreModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm p-4">
-      <div className="bg-zinc-900 border-2 border-amber-500/40 rounded-2xl shadow-[0_0_60px_rgba(245,158,11,0.25)] p-6 max-w-md w-full max-h-[90vh] overflow-y-auto relative">
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 rounded-t-2xl"></div>
-
-        {/* 下載截圖目標：包含成績核心資訊（不含 checkbox / 按鈕）*/}
-        <div ref={captureRef} className="bg-zinc-900 p-1">
+      {/* dialog shell：bg-zinc-900 + padding 包住成績卡 + 操作區（buttons / checkbox），統一 scroll + shadow */}
+      <div className="bg-zinc-900 rounded-2xl shadow-[0_0_60px_rgba(245,158,11,0.25)] max-w-md w-full max-h-[90vh] overflow-y-auto p-4">
+        {/* 下載截圖目標：完整成績卡（含 amber 邊框 + 上緣金漸層 + 標題 + 排名 + 數值 + 提示）*/}
+        <div ref={captureRef} className="bg-zinc-900 border-2 border-amber-500/40 rounded-2xl p-6 relative">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 rounded-t-2xl"></div>
         <div className="text-center mb-5">
           <p className="text-3xl mb-2">🎉</p>
           <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500">

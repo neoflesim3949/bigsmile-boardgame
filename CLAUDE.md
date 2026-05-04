@@ -437,6 +437,8 @@ app/
 - [ ] 終局結算後玩家首頁的「換匯所 / 銀行借貸 / 轉帳」按鈕仍是 `<Link>` → 玩家點下去才被後端拒絕，UX 差。正確：套 `<DisabledAction>` 占位元件直接 disable 顯示「已結算停用」
 - [ ] 終局結算後玩家首頁沒揭曉 modal → 違反規格。實作：`FinalScoreModal` 顯示排名（含 🥇🥈🥉）+ 最終分數 + 命格 / 狀態 + 四項數值，含「不再顯示」checkbox（localStorage key `final_score_dismissed_<userId>` 存的是 `final_scoring_at` 時間戳，下一場 admin 重啟後會自動失效）。每次回首頁就會重新檢查 localStorage
 - [ ] 揭曉彈窗的「下載成績圖片」按鈕用 static import 拉 `html-to-image` → 增加首頁初始 bundle ~30KB，多數玩家不會點。改用 dynamic `import('html-to-image')` 在 onClick 內觸發；截圖前用 `captureRef` 限制範圍（不含 checkbox / 下載 / 確認 button），且 `toPng` 套 `backgroundColor: '#18181b'` + `pixelRatio: 2` 確保淺色主題使用者也得到深底高解析度成績圖
+- [ ] 揭曉彈窗截圖 amber 邊框消失、buttons 跑進去 → captureRef 沒包完整成績卡。正確 DOM 結構：dialog overlay → dialog shell（單純 bg + p-4 + scroll，無邊框）→ `captureRef`（含 amber 邊框 + 上緣金漸層 + 標題 + 排名 + 6 格 + 提示）→ 兄弟 buttons（下載 / checkbox / 確認，不會出現在截圖）
+- [ ] 揭曉彈窗截圖**強制深色**（不論玩家當下主題）→ 違反規格。正確做法：**跟著當下主題**——讀 `document.documentElement.dataset.theme === 'light'` 決定 `toPng({ backgroundColor: ... })` 用 `#ffffff`（淺）或 `#18181b`（深）；玩家自己選什麼模式就下載什麼模式
 - [ ] 命格 / 狀態卡片設了 `show_all_stats` 條件 → 違反規格。兩張卡都「永遠顯示」；狀態 label 反映業力區間、不暗示福分值，與 ShowAllStats 無關（ShowAllStats 只擋具體數值的數字本身）
 - [ ] 排行榜算分搬回 JS 端（撈全部 → JS sort + slice）→ 違反現行設計。**現行設計：score 預存在 `PlayerStats.final_score`**，每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 都會重算（見 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore`）。Leaderboard 查詢直接 `ORDER BY ps.final_score DESC LIMIT N`。**不要再下 LIMIT 但忘了 ORDER BY** — 那會隨機截掉高分玩家（已踩過坑）
 - [ ] `/display/board` 「展開最終榜單」按鈕在活動進行中也顯示 → 違反規格（按鈕**僅** `serverIsFinal === true` 時才出現，避免在公開看板讓觀眾 preview 終局結算未發生時的排名）
