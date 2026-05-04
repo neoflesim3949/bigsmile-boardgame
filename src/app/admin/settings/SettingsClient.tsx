@@ -99,18 +99,22 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
           <h3 className="text-lg font-bold text-zinc-200 border-b border-zinc-800 pb-3">數值顯示設定</h3>
           <div className="flex items-center justify-between p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
             <div>
-              <p className="font-semibold text-zinc-200">顯示隱藏參數 (福分與業力)</p>
+              <p className="font-semibold text-zinc-200">福分與業力</p>
               <p className="text-sm text-zinc-500 mt-1">開啟後玩家將能看見福分與業力數值。</p>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.ShowAllStats === 'true'}
-                onChange={(e) => setField('ShowAllStats', e.target.checked ? 'true' : 'false')}
-                className="sr-only peer"
-              />
-              <div className="w-14 h-7 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-amber-500"></div>
-            </label>
+            <div className="flex items-center gap-2">
+              <span className={`text-sm font-medium ${settings.ShowAllStats === 'true' ? 'text-zinc-600' : 'text-zinc-200'}`}>隱藏</span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.ShowAllStats === 'true'}
+                  onChange={(e) => setField('ShowAllStats', e.target.checked ? 'true' : 'false')}
+                  className="sr-only peer"
+                />
+                <div className="w-14 h-7 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-amber-500"></div>
+              </label>
+              <span className={`text-sm font-medium ${settings.ShowAllStats === 'true' ? 'text-amber-400' : 'text-zinc-600'}`}>顯示</span>
+            </div>
           </div>
         </section>
 

@@ -559,7 +559,11 @@
 ```
 導覽遊戲 ✓  AND  抽卡模式 ✓
              ↓
-「遊戲開始」按鈕解鎖 → 設定 BoardGameEnabled = true
+「遊戲開始」按鈕解鎖 → setQuickFlag('BoardGameEnabled', true)
+  内部副作用：
+  1. 寫入 BoardGameEnabled = 'true'
+  2. 若 BoardGameStartedAt 為空 → 寫入當下時間（碼錶起點）
+  3. **自動將 ShowAllStats 設為 'false'**（活動進行中隱藏福分 / 業力，保持神秘感）
 ```
 
 ### 危險操作區 (Danger Zone) 重置邏輯

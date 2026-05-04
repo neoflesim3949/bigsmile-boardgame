@@ -186,6 +186,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 
 **A. 頂部工具列（5 鈕）**
 - 「導覽遊戲」toggle → `setQuickFlag('TourMode', bool)`。**TourMode=true 時**：(1) 玩家不需抽命格也能瀏覽所有頁面（middleware 跳過導向 `/onboarding`）；(2) 即使 health/blessing ≤ 0 不顯示地獄畫面；(3) **所有玩家 / 關主寫入 action 後端用 `assertNotTourMode()` 一律拒絕**（換匯 / 轉帳 / 股市 / 借貸 / 套用快捷模組 / 重生）；玩家頁面顯示 sky 色 banner 提示「導覽中」
+- 「遊戲開始」按鈕 → `setQuickFlag('BoardGameEnabled', true)`：除了寫入旗標 + 第一次開啟記錄 `BoardGameStartedAt`，**還會自動將 `ShowAllStats` 設為 `'false'`**（活動進行中隱藏福分 / 業力數值保持神秘感；admin 可手動切回 true）
 - 「抽卡模式」toggle → `setQuickFlag('CardDrawMode', bool)`
 - 「遊戲開始」按鈕 → `setQuickFlag('BoardGameEnabled', true)`；**前置條件**：上面兩個 toggle 都要先開
 - 「遊戲結束(計分)」按鈕 → `triggerFinalScoring()`（鎖定玩家寫入、看板切排行榜）。**已計分後此按鈕變成「重置系統」** → `restartGameCycle()`：核重置（清玩家狀態 / 持股 / 借貸 / 道具 / 股票歷史曲線 / 使用次數 / 看板場次狀態 / **玩家四項值 Transaction 明細**，並把事件全部停用、所有旗標歸零；**保留**帳號、商品定義含 current_price、道具、關卡、方案、命格範本、**StockRoundScript / StockRoundEvent 股票回合腳本**），**前端強制 5 次確認彈窗**。重置後三鍵全關，admin 必須重新按「導覽遊戲」「抽卡模式」「遊戲開始」才能啟動下一場

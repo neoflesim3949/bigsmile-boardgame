@@ -1542,6 +1542,8 @@ export async function setQuickFlag(
       if (!existing.rows[0]?.value) {
         await setSetting('BoardGameStartedAt', new Date().toISOString(), session.userId);
       }
+      // 遊戲開始時自動隱藏福分 / 業力數值（規格：活動進行中保持神秘感，admin 可手動切回）
+      await setSetting('ShowAllStats', 'false', session.userId);
     }
     revalidatePath('/admin');
     revalidatePath('/admin/settings');
