@@ -220,7 +220,8 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **`/`、`/stock` 玩家頁**：手機 / 桌面雙端皆要好。玩家金錢與健康始終公開顯示（健康寫入與顯示上限為 `100`），**福分與業力僅在 `ShowAllStats = true` 時顯示**。**頁面右上角必有「🔄 重新整理」按鈕**，點擊後 disabled 並顯示倒數，cooldown 秒數讀 `AppSettings.ManualRefreshCooldownSeconds`（預設 60，兩個玩家頁共用，後端 atomic 節流為主、前端 disable 為輔）。
 
 - **「福分／福報」字眼可見範圍**（CRITICAL，含同義字）：
-  - ✅ **可見**：admin / captain 後台所有頁面、看板（display/board）含 sparkline 與最終結算榜單、`/onboarding` 抽命格揭露、玩家最終結算後的歷史明細
+  - ✅ **可見**：admin / captain 後台所有頁面、看板（display/board）含 sparkline 與最終結算榜單、玩家最終結算後的歷史明細
+  - 🟡 **`/onboarding` 抽命格**：保留福分 / 業力**欄位**讓 layout 一致，但**數值固定顯示「???」**不論哪種命格（避免一開始就暴露玩家自身命格的福分 / 業力）
   - ✅ **條件可見**：`/`、`/stock` 等玩家日常頁面在 `ShowAllStats=true` 時可顯示福分卡片
   - ❌ **不可見**（即使 ShowAllStats=true 也禁止）：`/exchange` 與 `/bank` 路由（CLAUDE.md §6.2）— 任何錯誤訊息、UI label、計算過程都不能含「福分」「福報」字眼
   - ❌ **依 ShowAllStats 隱藏**：玩家頁面的 settings 字體預覽、history 錯誤提示文字、地獄畫面死因說明 — `ShowAllStats=false` 時改用「指標」「隱藏參數」等籠統字眼

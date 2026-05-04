@@ -240,11 +240,11 @@ export default function OnboardingClient() {
                   </div>
                   <div className="flex justify-between bg-zinc-900/80 rounded-lg px-2 py-1.5">
                     <span className="text-zinc-500">福分</span>
-                    <span className="text-teal-400 font-bold">{result.blessing}</span>
+                    <span className="text-teal-400 font-bold">???</span>
                   </div>
                   <div className="flex justify-between bg-zinc-900/80 rounded-lg px-2 py-1.5">
                     <span className="text-zinc-500">業力</span>
-                    <span className="text-purple-400 font-bold">{result.karma}</span>
+                    <span className="text-purple-400 font-bold">???</span>
                   </div>
                 </div>
               </div>
