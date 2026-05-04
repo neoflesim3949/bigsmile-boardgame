@@ -232,8 +232,9 @@
   5. **揭曉成績彈窗 `FinalScoreModal`**：每次回首頁自動跳出，內容含
      - 排名大字（🥇🥈🥉 / 🏅 + 「第 N」+「/ 共 M 位玩家」）
      - 最終分數（amber 大字）
-     - 命格 / 狀態（依 theme 套色 pill）+ 四項數值
+     - 命格 / 狀態（依 theme 套色 pill）+ 四項數值（六格用各 stat 色系半透明底，淺色模式也清晰）
      - 提示「點下方四項數值卡片可查看完整明細，回顧整局的大起大落」
+     - **「下載成績圖片」按鈕**：dynamic import `html-to-image`（~30KB gzip，按下才載入），用 `captureRef` 包住成績核心區域（排名 + 分數 + 命格狀態 + 六格 + 提示文字），輸出 PNG。截圖**強制深色背景 `#18181b` + `pixelRatio: 2`**（即使玩家是淺色主題截圖也清楚），檔名 `開運大富翁_<玩家名>_第N名.png`。截圖範圍**不含**checkbox / 下載按鈕 / 確認按鈕（保持成績圖簡潔）
      - 「不再顯示此彈窗（直到下一場活動）」checkbox
      - 「確認」button
   6. **彈窗持久化**：localStorage key `final_score_dismissed_<userId>`，存的值是 `final_scoring_at` 時間戳。當 admin 重啟新場次（`restartGameCycle`）後 `final_scoring_at` 變空，下一輪結算會是新時間戳，舊的 dismiss flag 自動失效，玩家會再次看到新場次的揭曉彈窗。

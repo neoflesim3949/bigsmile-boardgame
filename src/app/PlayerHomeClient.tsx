@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition, useEffect } from 'react';
+import { useState, useTransition, useEffect, useRef } from 'react';
 import {
   Wallet, Heart, Sparkles, Scale, Star, RefreshCcw, Package, TrendingUp,
-  Building2, Lock, Settings, Send, Skull, AlertCircle, CheckCircle2,
+  Building2, Lock, Settings, Send, Skull, AlertCircle, CheckCircle2, Download,
 } from 'lucide-react';
 import QrButton from '@/components/QrButton';
 import { getMyStats, type PlayerStatsView, type PlayerItemView } from '@/app/actions/player';
@@ -364,6 +364,8 @@ function FinalScoreModal({
   onDismiss: (remember: boolean) => void;
 }) {
   const [remember, setRemember] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const captureRef = useRef<HTMLDivElement>(null);
   const dt = themeStyle(stats.destiny_theme);
   const kt = themeStyle(stats.karma_band_theme);
   const rankClass = stats.final_rank === 1 ? 'text-yellow-300'
@@ -375,11 +377,38 @@ function FinalScoreModal({
     : stats.final_rank === 3 ? '🥉'
     : '🏅';
 
+  async function handleDownload() {
+    if (!captureRef.current || downloading) return;
+    setDownloading(true);
+    try {
+      // Dynamic import — html-to-image 只在使用者點下載才載入，不影響首頁初始 bundle
+      const { toPng } = await import('html-to-image');
+      // 強制深色背景 + 2x DPI，避免 user 使用淺色主題時截圖背景太淡
+      const dataUrl = await toPng(captureRef.current, {
+        pixelRatio: 2,
+        backgroundColor: '#18181b',
+        cacheBust: true,
+      });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `開運大富翁_${stats.name}_第${stats.final_rank}名.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      console.error('download failed', e);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm p-4">
       <div className="bg-zinc-900 border-2 border-amber-500/40 rounded-2xl shadow-[0_0_60px_rgba(245,158,11,0.25)] p-6 max-w-md w-full max-h-[90vh] overflow-y-auto relative">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 rounded-t-2xl"></div>
 
+        {/* 下載截圖目標：包含成績核心資訊（不含 checkbox / 按鈕）*/}
+        <div ref={captureRef} className="bg-zinc-900 p-1">
         <div className="text-center mb-5">
           <p className="text-3xl mb-2">🎉</p>
           <h2 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500">
@@ -430,11 +459,22 @@ function FinalScoreModal({
           </div>
         </div>
 
-        <p className="text-xs text-zinc-500 text-center mb-4 italic">
+        <p className="text-xs text-zinc-500 text-center mb-2 italic">
           點下方四項數值卡片可查看完整明細，回顧整局的大起大落
         </p>
+        </div>
+        {/* /capture region — 下方按鈕 / checkbox 不會出現在截圖 */}
 
-        <label className="flex items-center gap-2 text-xs text-zinc-400 mb-4 cursor-pointer">
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="w-full mt-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-60 text-zinc-200 font-bold py-2.5 rounded-xl transition-colors min-h-[44px] flex items-center justify-center gap-2 border border-zinc-700"
+        >
+          <Download className="w-4 h-4" />
+          {downloading ? '產生圖片中…' : '下載成績圖片'}
+        </button>
+
+        <label className="flex items-center gap-2 text-xs text-zinc-400 mt-4 mb-3 cursor-pointer">
           <input
             type="checkbox"
             checked={remember}

@@ -665,6 +665,12 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `getStockMarket({ manual?: boolean, queryCode?: string })` | 取得股市商品。`queryCode` 為空時取得所有 `is_visible = true` 商品的當前價格；若帶入 `queryCode` 則精準回傳該代碼的商品（無論顯示與否，供隱藏商品購買）。`manual=true` 時共用 `last_manual_refresh_at` 60 秒節流 | 視情況 |
 | `getMyStats({ manual?: boolean })` | 取得玩家自己的 stats。新增三個衍生欄位：(1) `final_score`（直接讀 `PlayerStats.final_score`）；(2) `final_rank`（單條子查詢 `COUNT(*) + 1 WHERE other.final_score > my.final_score AND role='player' AND is_active`）；(3) `total_players`（active player 總數）。終局結算後 `PlayerHomeClient` 用這 3 欄位渲染 `FinalScoreModal` 揭曉彈窗 | 視情況 |
 
+**FinalScoreModal 實作細節**：
+- 截圖功能：dynamic `import('html-to-image')` 在 onClick 觸發（不增首頁初始 bundle）；`captureRef` 限制截圖範圍（不含 checkbox / 下載 / 確認 button）；`toPng({ pixelRatio: 2, backgroundColor: '#18181b' })` 強制深底高解析度
+- 六格 stat box 用 `bg-{amber/rose/teal/purple}-500/10 border-{...}-500/30` 半透明底（取代 `bg-zinc-950 border-zinc-800`，淺色模式幾乎跟外框同色看不清）
+- 文字字級對齊「確認」button (`text-base`)：「你的排名 / 共 N 位玩家 / 最終分數」三 label 從 text-xs / text-sm → text-base
+- 淺色模式 globals.css 補：`bg-zinc-950/70`、`bg-{color}-500/{10,15,20}`、`border-{color}-500/30`、`border-zinc-{700,800}/{50,60}`、`text-{purple,sky}-400`、`text-yellow-300` / `text-amber-500` mapping
+
 ### 5.2 關主端
 
 | Function | 說明 | 交易需求 |

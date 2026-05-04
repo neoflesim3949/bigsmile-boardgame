@@ -194,10 +194,13 @@ body {
   /* ── 帶透明度的版本（Tailwind v4 會生成 .bg-zinc-XXX\/YY 字面 class）──
      必須 escape 斜線；否則整片頁面會在淺色模式留下深色 ── */
   .bg-zinc-950\/95 { background-color: rgba(248, 248, 248, 0.96) !important; }
+  .bg-zinc-950\/85 { background-color: rgba(244, 244, 245, 0.94) !important; }
   .bg-zinc-950\/80 { background-color: rgba(248, 248, 248, 0.92) !important; }
+  .bg-zinc-950\/70 { background-color: rgba(244, 244, 245, 0.88) !important; } /* 揭曉彈窗排名底 */
   .bg-zinc-950\/60 { background-color: rgba(248, 248, 248, 0.85) !important; }
   .bg-zinc-950\/50 { background-color: rgba(244, 244, 245, 0.80) !important; } /* 淺灰底卡 inset */
   .bg-zinc-950\/40 { background-color: rgba(244, 244, 245, 0.70) !important; }
+  .bg-zinc-950\/30 { background-color: rgba(244, 244, 245, 0.60) !important; }
 
   .bg-zinc-900\/95 { background-color: rgba(255, 255, 255, 0.96) !important; }
   .bg-zinc-900\/80 { background-color: rgba(255, 255, 255, 0.92) !important; }
@@ -312,6 +315,10 @@ body {
     border-color: #e4e4e7 !important;
   }
 
+  .border-zinc-800\/60 { border-color: rgba(228, 228, 231, 0.85) !important; }
+  .border-zinc-800\/50 { border-color: rgba(228, 228, 231, 0.75) !important; }
+  .border-zinc-700\/50 { border-color: rgba(212, 212, 216, 0.7) !important; }
+
   .border-zinc-700 {
     border-color: #d4d4d8 !important;
   }
@@ -330,6 +337,8 @@ body {
   .text-purple-400  { color: #7e22ce !important; } /* purple-700 */
   .text-purple-300  { color: #6b21a8 !important; } /* purple-800 */
   .text-sky-400     { color: #0369a1 !important; } /* sky-700  */
+  .text-yellow-300  { color: #b45309 !important; } /* amber-700 — 揭曉彈窗第 1 名 */
+  .text-amber-500   { color: #b45309 !important; } /* amber-700 — 揭曉彈窗第 3 名 */
 
   /* ── 輸入框 ── */
   input:not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-emerald"]),

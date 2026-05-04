@@ -428,7 +428,7 @@ app/
 - [ ] 漲跌只用紅綠沒加箭頭（color-blind 友善必加 ↑↓）；**flat / 持平**用 `lucide Minus` icon（`−` 形狀）會被誤認為「股價是負數」，要改成 invisible spacer 維持對齊
 - [ ] 觸控目標 < 44px
 - [ ] Scanner 沒用 dynamic import 導致 SSR 錯誤
-- [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補。**已補的色系**：`bg-{amber/emerald/teal/rose/purple/sky}-500/{10,15,20}`、`border-{amber/emerald/teal/rose/purple/sky}-500/30`、`text-{purple/sky}-400`
+- [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補。**已補的色系**：`bg-zinc-950/{30,70,85}`、`bg-{amber/emerald/teal/rose/purple/sky}-500/{10,15,20}`、`border-{amber/emerald/teal/rose/purple/sky}-500/30`、`border-zinc-{700,800}/{50,60}`、`text-{purple/sky}-400`、`text-yellow-300`、`text-amber-500`
 - [ ] 看板 `/display/board` 終局結算後 toggle 「返回常規模式」無效 — 不可寫 `isFinal = forceFinal || final_scoring_triggered_at`（被 server 鎖死），要改成 `userOverride !== null ? userOverride : serverIsFinal` 讓 user 真的能切回看股市
 - [ ] 看板風雲榜 regular 模式（14% 窄欄）若用 sticky thead 會視覺脫節 → 整個 thead 不渲染，圓圈+姓名自明
 - [ ] 玩家日常頁（地獄畫面 / settings 預覽 / history 提示）`ShowAllStats=false` 時直接寫「福分」「業力」字眼 → 違反 §6.2 字眼可見範圍（必須改用「指標」「隱藏參數」籠統字眼，admin / captain 後台 / onboarding / 最終結算可見）
@@ -436,6 +436,7 @@ app/
 - [ ] 終局結算後玩家首頁福分 / 業力 仍受 `ShowAllStats` 控制顯示鎖頭 → 違反 V2 §6.2「玩家最終結算後的歷史明細」可見規格。正確條件：`stats.show_all_stats || stats.final_scoring_at` 任一為真就解鎖
 - [ ] 終局結算後玩家首頁的「換匯所 / 銀行借貸 / 轉帳」按鈕仍是 `<Link>` → 玩家點下去才被後端拒絕，UX 差。正確：套 `<DisabledAction>` 占位元件直接 disable 顯示「已結算停用」
 - [ ] 終局結算後玩家首頁沒揭曉 modal → 違反規格。實作：`FinalScoreModal` 顯示排名（含 🥇🥈🥉）+ 最終分數 + 命格 / 狀態 + 四項數值，含「不再顯示」checkbox（localStorage key `final_score_dismissed_<userId>` 存的是 `final_scoring_at` 時間戳，下一場 admin 重啟後會自動失效）。每次回首頁就會重新檢查 localStorage
+- [ ] 揭曉彈窗的「下載成績圖片」按鈕用 static import 拉 `html-to-image` → 增加首頁初始 bundle ~30KB，多數玩家不會點。改用 dynamic `import('html-to-image')` 在 onClick 內觸發；截圖前用 `captureRef` 限制範圍（不含 checkbox / 下載 / 確認 button），且 `toPng` 套 `backgroundColor: '#18181b'` + `pixelRatio: 2` 確保淺色主題使用者也得到深底高解析度成績圖
 - [ ] 命格 / 狀態卡片設了 `show_all_stats` 條件 → 違反規格。兩張卡都「永遠顯示」；狀態 label 反映業力區間、不暗示福分值，與 ShowAllStats 無關（ShowAllStats 只擋具體數值的數字本身）
 - [ ] 排行榜算分搬回 JS 端（撈全部 → JS sort + slice）→ 違反現行設計。**現行設計：score 預存在 `PlayerStats.final_score`**，每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 都會重算（見 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore`）。Leaderboard 查詢直接 `ORDER BY ps.final_score DESC LIMIT N`。**不要再下 LIMIT 但忘了 ORDER BY** — 那會隨機截掉高分玩家（已踩過坑）
 - [ ] `/display/board` 「展開最終榜單」按鈕在活動進行中也顯示 → 違反規格（按鈕**僅** `serverIsFinal === true` 時才出現，避免在公開看板讓觀眾 preview 終局結算未發生時的排名）
