@@ -57,6 +57,7 @@ const templateSchema = z.object({
   blessing: z.number().int(),
   karma: z.number().int(),
   is_active: z.boolean(),
+  draw_ratio: z.number().int().min(0).max(100),
 });
 export type TemplatePayload = z.infer<typeof templateSchema>;
 
@@ -69,7 +70,7 @@ export async function listTemplates(): Promise<ActionResult<TemplateRow[]>> {
     await requireRole('admin');
     const r = await query<TemplateRow>(
       `SELECT id, label, emoji, description, theme, rarity_label,
-              money, health, blessing, karma, is_active
+              money, health, blessing, karma, is_active, draw_ratio
        FROM "InitialValueTemplate"
        ORDER BY created_at ASC`,
     );
@@ -87,12 +88,12 @@ export async function upsertTemplate(payload: TemplatePayload): Promise<ActionRe
       const r = await query<TemplateRow>(
         `UPDATE "InitialValueTemplate"
          SET label=$1, emoji=$2, description=$3, theme=$4, rarity_label=$5,
-             money=$6, health=$7, blessing=$8, karma=$9, is_active=$10
-         WHERE id=$11
+             money=$6, health=$7, blessing=$8, karma=$9, is_active=$10, draw_ratio=$11
+         WHERE id=$12
          RETURNING id, label, emoji, description, theme, rarity_label,
-                   money, health, blessing, karma, is_active`,
+                   money, health, blessing, karma, is_active, draw_ratio`,
         [data.label, data.emoji, data.description, data.theme, data.rarity_label,
-         data.money, data.health, data.blessing, data.karma, data.is_active, data.id],
+         data.money, data.health, data.blessing, data.karma, data.is_active, data.draw_ratio, data.id],
       );
       if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '範本不存在');
       revalidatePath('/admin/settings');
@@ -100,12 +101,12 @@ export async function upsertTemplate(payload: TemplatePayload): Promise<ActionRe
     }
     const r = await query<TemplateRow>(
       `INSERT INTO "InitialValueTemplate"
-         (label, emoji, description, theme, rarity_label, money, health, blessing, karma, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (label, emoji, description, theme, rarity_label, money, health, blessing, karma, is_active, draw_ratio)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id, label, emoji, description, theme, rarity_label,
-                 money, health, blessing, karma, is_active`,
+                 money, health, blessing, karma, is_active, draw_ratio`,
       [data.label, data.emoji, data.description, data.theme, data.rarity_label,
-       data.money, data.health, data.blessing, data.karma, data.is_active],
+       data.money, data.health, data.blessing, data.karma, data.is_active, data.draw_ratio],
     );
     revalidatePath('/admin/settings');
     return ok(r.rows[0]);

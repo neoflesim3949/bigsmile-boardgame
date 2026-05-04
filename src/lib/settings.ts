@@ -35,7 +35,8 @@ export type AppSettingsKey =
   | 'BoardRefreshInterval'
   | 'BoardMarqueeMaxMinutes'
   | 'RoundIntervalMinutes'
-  | 'StockPriceRule';
+  | 'StockPriceRule'
+  | 'MaxDestinyDraws';
 
 export const DEFAULT_SETTINGS: Record<AppSettingsKey, string> = {
   BoardGameEnabled: 'false',
@@ -68,6 +69,7 @@ export const DEFAULT_SETTINGS: Record<AppSettingsKey, string> = {
   BoardMarqueeMaxMinutes: '120',
   RoundIntervalMinutes: '10',
   StockPriceRule: '{}',
+  MaxDestinyDraws: '100',
 };
 
 export async function getSetting(key: AppSettingsKey): Promise<string> {

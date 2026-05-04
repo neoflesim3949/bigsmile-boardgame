@@ -55,6 +55,7 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
       }
 
       // 抽範本（含視覺欄位 — emoji / theme / 描述都由後台 CRUD 設定）
+      // 規格：滾動 cycle 配額演算法 — CLAUDE.md「命格抽卡比例與配額」
       const templates = await client.query<{
         label: string;
         emoji: string;
@@ -65,9 +66,10 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
         health: number;
         blessing: number;
         karma: number;
+        draw_ratio: number;
       }>(
         `SELECT label, emoji, description, theme, rarity_label,
-                money, health, blessing, karma
+                money, health, blessing, karma, draw_ratio
          FROM "InitialValueTemplate"
          WHERE is_active = true`,
       );
@@ -79,8 +81,31 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
       };
 
       if (templates.rows.length > 0) {
-        const idx = Math.floor(Math.random() * templates.rows.length);
-        chosen = templates.rows[idx];
+        // 取 MaxDestinyDraws 與各命格已抽人數（單條 GROUP BY，無 N+1）
+        const maxDrawsStr = await getSetting('MaxDestinyDraws');
+        const maxDraws = Math.max(1, Number(maxDrawsStr) || 100);
+        const drawnR = await client.query<{ destiny_name: string; cnt: string }>(
+          `SELECT destiny_name, COUNT(*)::text AS cnt
+           FROM "PlayerStats"
+           WHERE destiny_name IS NOT NULL
+           GROUP BY destiny_name`,
+        );
+        const drawnMap = new Map(drawnR.rows.map((r) => [r.destiny_name, Number(r.cnt)]));
+        const totalDrawn = Array.from(drawnMap.values()).reduce((a, b) => a + b, 0);
+        const cycle = Math.floor(totalDrawn / maxDraws);
+
+        // 篩出 active 且仍有 quota 的候選
+        const candidates = templates.rows.filter((t) => {
+          const quota = Math.floor((maxDraws * t.draw_ratio) / 100);
+          if (quota === 0) return false; // ratio=0 不參與抽卡（admin 故意設）
+          const effective = (cycle + 1) * quota;
+          const already = drawnMap.get(t.label) ?? 0;
+          return already < effective;
+        });
+
+        // 候選為空 → fallback 從所有 active 範本均勻抽（永不擋人，極端浮點偏差）
+        const pool = candidates.length > 0 ? candidates : templates.rows;
+        chosen = pool[Math.floor(Math.random() * pool.length)];
       } else {
         // 防呆：無範本時 fallback AppSettings + 預設視覺
         const fallback = await getSettings([

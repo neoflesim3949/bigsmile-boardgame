@@ -13,7 +13,25 @@
 - 角色：**三分互斥** — 大會管理員 / 玩家 / 關主（關主**不參與遊戲本身**，純發放分數的工具人）；活動看板靠 display token 唯讀，不算 Account 角色
 - 主要頁面：管理後台（桌面優先）、關主後台 / 掃碼（手機）、玩家首頁、股市、活動看板
 - 特殊功能:**重生鍵** — 特定關卡的關主可對玩家執行「重生」：**全部歸零重來** — 四項參數重設為重生初始值、清空所有持股、清空銀行借款（含 `loan_updated_at`）、**清空所有道具**。**前置防呆**：玩家必須**主動**在地獄畫面把 QR 拿給關主掃（**手動輸入 ID 路徑不會出現重生鍵**，前後端雙重驗證），且後端 pg tx 內即時驗證 `health ≤ 0 || blessing ≤ 0`，未死亡的玩家不能被任意重置
-- 玩家進入頁面時若 `AppSettings.CardDrawMode==='true'` 且 `destiny_name=NULL` → middleware 強制導 `/onboarding` 抽命格範本（隨機從啟用中 `InitialValueTemplate` 抽一張）；抽完才能進 `/`。**觸發條件不是「首次登入」**：只要兩條件同時成立（抽卡模式開啟 + 尚無命格）就會被導向，無論第幾次進站。若 `CardDrawMode==='false'` 或玩家已有 `destiny_name`，自行進 `/onboarding` 一律被擋回 `/`
+- 玩家進入頁面時若 `AppSettings.CardDrawMode==='true'` 且 `destiny_name=NULL` → middleware 強制導 `/onboarding` 抽命格範本；抽完才能進 `/`。**觸發條件不是「首次登入」**：只要兩條件同時成立（抽卡模式開啟 + 尚無命格）就會被導向，無論第幾次進站。若 `CardDrawMode==='false'` 或玩家已有 `destiny_name`，自行進 `/onboarding` 一律被擋回 `/`
+
+### 命格抽卡比例與配額（CRITICAL）
+- **設定基準**：`AppSettings.MaxDestinyDraws`（預設 100）= 比例計算基準人數，**不是硬上限**
+- **每範本比例**：`InitialValueTemplate.draw_ratio`（INTEGER 0–100）= 該命格佔 MaxDestinyDraws 的百分比
+- **配額計算**：每個命格 quota = `floor(MaxDestinyDraws × draw_ratio / 100)`
+- **抽卡演算法（滾動 cycle，不擋人）**：
+  1. 查當前已抽 destiny_name 各命格人數
+  2. 算 `cycle = floor(total_drawn / MaxDestinyDraws)`（已跑幾輪）
+  3. 該命格的有效 quota = `(cycle + 1) × quota`（每多一輪允許再抽 quota 個）
+  4. 過濾掉 `already_drawn >= effective_quota` 的命格
+  5. 若仍有候選 → 隨機抽（同 ratio 內均勻）
+  6. 若全部命格都達 effective quota（極端情況浮點偏差）→ 從所有 active 範本均勻抽（不擋人 fallback）
+- **後台 UI**（`/admin/settings` 命格範本池區）：
+  - 頂部加全域「總人數基準 [100]」input → 寫入 `MaxDestinyDraws`
+  - 每張卡加「比例 [10] %」input
+  - 即時換算顯示：「富貴命 quota 10 / 清修命 30 / 勞碌命 60，合計 100%」
+  - 警示比例不為 100（紅字「目前合計 95%，建議調整」），但不擋儲存（讓 admin 自由配）
+- **保證**：抽完 100 人後系統不擋玩家，會繼續按同比例分配（第 101 人開始第二輪 cycle）
 - 主題：`/admin/*` 與 `/display/*` **強制深色 + md 字級**；其他路由跟玩家偏好（`pref_theme` / `pref_font_size` localStorage）。詳見架構文件 §12.3
 - **回合制**：主持人後台按「下一回合」按鈕同時推進股價 + 結算所有借款利息（每 10 分鐘 1 次，120 分鐘共 12 回合）；**不用 cron**（Supabase 免費版不支援）。**第 1 回合推進時自動關閉 `TourMode`**（admin 從 demo 進入正式遊戲）；`tickRound` 內驗 `BoardGameEnabled === 'true'` 與 `final_scoring_triggered_at IS NULL`，不符直接拒絕
 - 預期負載：單場 2 小時活動、**≤ 500 人**同時在線、1～3 台大屏幕

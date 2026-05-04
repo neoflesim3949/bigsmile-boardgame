@@ -139,7 +139,7 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
           <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
             <div>
               <h3 className="text-lg font-bold text-zinc-200">新手命格範本 (抽卡池)</h3>
-              <p className="text-xs text-zinc-500 mt-1">啟用中的範本會被列入抽卡池，玩家進入抽卡頁時隨機抽取一張。</p>
+              <p className="text-xs text-zinc-500 mt-1">啟用中的範本依比例配額抽卡。抽完設定的總人數後，第 N+1 人開始第二輪 cycle 同比例分配，永不擋人。</p>
             </div>
             <button
               onClick={() => setEditing(emptyTemplate())}
@@ -149,11 +149,19 @@ export default function SettingsClient({ initialSettings, initialTemplates }: Pr
             </button>
           </div>
 
+          {/* 總人數基準 + 比例合計 */}
+          <DestinyQuotaPanel
+            maxDraws={settings.MaxDestinyDraws ?? '100'}
+            templates={templates}
+            onChangeMaxDraws={(v) => setField('MaxDestinyDraws', v)}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {templates.map((t) => (
               <TemplateCard
                 key={t.id}
                 t={t}
+                maxDraws={Number(settings.MaxDestinyDraws) || 100}
                 onToggle={async (active) => {
                   const r = await upsertTemplate({ ...t, is_active: active });
                   if (r.ok) {
@@ -263,6 +271,7 @@ function emptyTemplate(): TemplateRow {
     blessing: 10,
     karma: 0,
     is_active: true,
+    draw_ratio: 0,
   };
 }
 
@@ -294,13 +303,15 @@ function NumField({
 }
 
 function TemplateCard({
-  t, onToggle, onEdit, onDelete,
+  t, maxDraws, onToggle, onEdit, onDelete,
 }: {
   t: TemplateRow;
+  maxDraws: number;
   onToggle: (active: boolean) => void | Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const quota = Math.floor((maxDraws * t.draw_ratio) / 100);
   return (
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4 relative group">
       <div className="flex justify-between items-start mb-3">
@@ -318,15 +329,66 @@ function TemplateCard({
           <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
         </label>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-sm">
+      <div className="grid grid-cols-2 gap-2 text-sm mb-2">
         <div className="flex justify-between"><span className="text-zinc-500">金錢</span><span className="text-amber-400 font-medium">{t.money}</span></div>
         <div className="flex justify-between"><span className="text-zinc-500">健康</span><span className="text-rose-400 font-medium">{t.health}</span></div>
         <div className="flex justify-between"><span className="text-zinc-500">福分</span><span className="text-teal-400 font-medium">{t.blessing}</span></div>
         <div className="flex justify-between"><span className="text-zinc-500">業力</span><span className="text-purple-400 font-medium">{t.karma}</span></div>
       </div>
+      <div className="border-t border-zinc-800 pt-2 flex justify-between text-xs">
+        <span className="text-zinc-500">抽卡比例</span>
+        <span className={t.draw_ratio > 0 ? 'text-emerald-400 font-mono font-bold' : 'text-zinc-600 font-mono'}>
+          {t.draw_ratio}% <span className="text-zinc-500 font-normal">→ {quota} 人</span>
+        </span>
+      </div>
       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-zinc-900/90 rounded p-1 shadow-lg">
         <button onClick={onEdit} className="p-1 text-zinc-400 hover:text-amber-400 transition-colors"><Edit2 className="w-3.5 h-3.5" /></button>
         <button onClick={onDelete} className="p-1 text-zinc-400 hover:text-rose-400 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+    </div>
+  );
+}
+
+function DestinyQuotaPanel({
+  maxDraws, templates, onChangeMaxDraws,
+}: {
+  maxDraws: string;
+  templates: TemplateRow[];
+  onChangeMaxDraws: (v: string) => void;
+}) {
+  const activeTemplates = templates.filter((t) => t.is_active);
+  const totalRatio = activeTemplates.reduce((sum, t) => sum + (t.draw_ratio || 0), 0);
+  const isExact = totalRatio === 100;
+  const colorCls = isExact ? 'text-emerald-400' : totalRatio > 100 ? 'text-rose-400' : 'text-amber-400';
+  const num = Math.max(1, Number(maxDraws) || 100);
+  return (
+    <div className="bg-zinc-900/50 rounded-lg border border-zinc-800 p-4 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-zinc-200">總人數基準（MaxDestinyDraws）</p>
+          <p className="text-xs text-zinc-500 mt-0.5">每張命格 quota = 此值 × 比例 ÷ 100。記得按右上「儲存變更」</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="1"
+            value={maxDraws}
+            onChange={(e) => onChangeMaxDraws(e.target.value)}
+            className="w-24 bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-center font-mono"
+          />
+          <span className="text-zinc-500 text-sm">人</span>
+        </div>
+      </div>
+      <div className="flex items-center justify-between text-xs border-t border-zinc-800 pt-2">
+        <span className="text-zinc-500">啟用範本比例合計</span>
+        <span className={`${colorCls} font-mono font-bold`}>
+          {totalRatio}%
+          {!isExact && (
+            <span className="ml-2 text-[0.6875rem] font-normal">
+              （建議調為 100%；目前 quota 合計 {Math.floor((num * totalRatio) / 100)} / {num} 人）
+            </span>
+          )}
+        </span>
       </div>
     </div>
   );
@@ -356,6 +418,7 @@ function TemplateModal({
         blessing: Number(draft.blessing),
         karma: Number(draft.karma),
         is_active: draft.is_active,
+        draw_ratio: Number(draft.draw_ratio) || 0,
       });
       if (r.ok) onSaved(r.data!);
       else setErr(r.error?.message ?? '儲存失敗');
@@ -402,6 +465,24 @@ function TemplateModal({
             <SmallNum label="初始健康（0–100）" value={draft.health} onChange={(v) => setDraft({ ...draft, health: Math.min(100, Math.max(0, v)) })} />
             <SmallNum label="初始福分" value={draft.blessing} onChange={(v) => setDraft({ ...draft, blessing: v })} />
             <SmallNum label="初始業力" value={draft.karma} onChange={(v) => setDraft({ ...draft, karma: v })} />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-500">抽卡比例（0–100 %）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={draft.draw_ratio}
+                onChange={(e) => {
+                  const n = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                  setDraft({ ...draft, draw_ratio: n });
+                }}
+                className="w-24 bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-center font-mono"
+              />
+              <span className="text-zinc-500 text-sm">%</span>
+              <span className="text-xs text-zinc-600 ml-2">啟用範本比例合計建議 = 100%</span>
+            </div>
           </div>
           <label className="flex items-center gap-2 text-sm text-zinc-300">
             <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />

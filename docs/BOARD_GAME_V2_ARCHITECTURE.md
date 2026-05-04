@@ -174,9 +174,21 @@
 | `blessing` | INTEGER | 初始福分 |
 | `karma` | INTEGER | 初始業力 |
 | `is_active` | BOOLEAN | 是否納入抽卡池 |
+| `draw_ratio` | INTEGER `CHECK (draw_ratio BETWEEN 0 AND 100)` DEFAULT 0 | 抽卡比例（%，0–100），quota = `floor(MaxDestinyDraws × draw_ratio / 100)` |
 | `created_at` | TIMESTAMPTZ | |
 
-> 管理員可建立多個範本。新玩家抽卡時從「啟用中」範本隨機取一個，連同視覺欄位（emoji / description / theme / rarity_label）一起回給前端 onboarding 頁。若無啟用範本，回退使用 `AppSettings` 的 `InitialMoney` / `InitialHealth` / `InitialBlessing` / `InitialKarma`，視覺套預設值。
+> 管理員可建立多個範本。新玩家抽卡時從「啟用中」範本依比例配額抽（演算法見 [§5 drawDestiny](#51-玩家端) / CLAUDE.md「命格抽卡比例與配額」），連同視覺欄位（emoji / description / theme / rarity_label）一起回給前端 onboarding 頁。若無啟用範本，回退使用 `AppSettings` 的 `InitialMoney` / `InitialHealth` / `InitialBlessing` / `InitialKarma`，視覺套預設值。
+
+> **抽卡比例與配額（CRITICAL）**：
+> - `MaxDestinyDraws`（AppSettings）= 比例計算基準（預設 100），**不是硬上限**
+> - 各範本 `draw_ratio` 加總建議 = 100%，但不擋（admin 可故意配 95% 或 110%，前端只警示）
+> - **滾動 cycle 演算法**：抽完 N 人後不擋玩家，第 N+1 人開始第二輪 cycle（同比例再分配）
+>   ```
+>   cycle = floor(total_drawn / MaxDestinyDraws)
+>   effective_quota_per_template = (cycle + 1) × quota_per_template
+>   候選 = 已抽人數 < effective_quota 的 templates
+>   ```
+> - 候選為空（極端浮點偏差）→ fallback：從所有 active templates 均勻抽（**永遠不擋人**）
 > **為什麼 `theme` 是枚舉**：Tailwind JIT 必須在編譯期看到完整的 class 字串才會生成樣式，所以後台不能存任意 hex 色碼讓前端動態套用。改採「色系名稱」由後台選擇、前端維護一份固定的 `theme → Tailwind class` palette（見 `src/app/onboarding/OnboardingClient.tsx` 的 `THEME_PALETTE`）。新增色系流程：先在 palette 加一筆，再在 schema CHECK 加值。
 
 #### `QuickAction` — 關主快捷功能模組
@@ -594,6 +606,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | Function | 說明 | 交易需求 |
 |----------|------|----------|
 | `getMyStats({ manual?: boolean })` | 取得四項參數、道具列表、持股。`manual=true`（玩家點「重新整理」按鈕）時會以**單一 atomic SQL** 強制 60 秒節流：`UPDATE PlayerStats SET last_manual_refresh_at = now() WHERE user_id = $1 AND (last_manual_refresh_at IS NULL OR last_manual_refresh_at < now() - interval 'N seconds') RETURNING true`；rowcount = 0 → throw `REFRESH_RATE_LIMITED`（附 `retryAfterSeconds`）。`manual=false`（進頁面初次載入、action response）不節流 | 視情況：manual=true 為 pg tx |
+| `drawDestiny()` | 玩家抽命格。**滾動 cycle 配額演算法**：(1) `cycle = floor(total_drawn / MaxDestinyDraws)`；(2) 各範本 effective_quota = `(cycle + 1) × floor(MaxDestinyDraws × draw_ratio / 100)`；(3) 候選 = 已抽 < effective_quota 的 active 範本；(4) 候選為空則 fallback 從所有 active 範本均勻抽（永不擋人）；(5) 候選非空從中均勻抽（同 ratio 內隨機）。寫入 PlayerStats.destiny_name + 四項初始值 + INSERT Transaction 'destiny_draw'。`destiny_name IS NOT NULL` 時 idempotent 拒絕（防重抽） | pg tx |
 | `exchangeBlessingToMoney(userId, amount)` | 福報換金錢（單向） | pg tx |
 | `transferMoney(fromUserId, toUserId, amount)` | 玩家間金錢互轉 | pg tx |
 | `buyStock(userId, stockId, shares)` | 買進股票（對於 `is_visible = false` 的隱藏商品，只要能傳入正確的 stockId 亦可購買） | pg tx |
@@ -688,10 +701,11 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `ScoreWeightMoney` | 數字字串 | 最終計分：金錢權重（建議 `'0.05'`） |
 | `ScoreWeightBlessing` | 數字字串 | 最終計分：福分權重（建議 `'200'`） |
 | `ScoreWeightKarma` | 數字字串 | 最終計分：業力權重（建議 `'150'`，公式中為扣除） |
-| `InitialMoney` | 數字字串 | 新玩家初始金錢 |
-| `InitialHealth` | 數字字串 | 新玩家初始健康 |
-| `InitialBlessing` | 數字字串 | 新玩家初始福分 |
-| `InitialKarma` | 數字字串 | 新玩家初始業力 |
+| `InitialMoney` | 數字字串 | 新玩家初始金錢（命格範本不可用時 fallback） |
+| `InitialHealth` | 數字字串 | 新玩家初始健康（fallback） |
+| `InitialBlessing` | 數字字串 | 新玩家初始福分（fallback） |
+| `InitialKarma` | 數字字串 | 新玩家初始業力（fallback） |
+| `MaxDestinyDraws` | 數字字串（預設 `'100'`） | **命格抽卡比例計算基準**：`InitialValueTemplate.draw_ratio` 換算 quota = `floor(MaxDestinyDraws × draw_ratio / 100)`。**不是硬上限**，超過會走滾動 cycle 繼續按比例分配。`/admin/settings` 命格範本池區頂部設定 |
 | `RebirthMoney` | 數字字串 | 重生後金錢初始值（與新玩家初始值分開管理） |
 | `RebirthHealth` | 數字字串 | 重生後健康初始值 |
 | `RebirthBlessing` | 數字字串 | 重生後福分初始值 |
@@ -1937,8 +1951,12 @@ npm run lint     # ESLint 檢查
 │    金錢 [500]   健康 [50]  福分 [3]  業力 [0]                │
 │                                                              │
 │ 5. 新手命格範本池                              [ + 新增 ]    │
-│    ▸ 富貴命  🀄  rare    1000/80/5/0    [active]            │
-│    ▸ 慈悲命  🌸  common  500/100/10/0   [active]            │
+│    總人數基準（MaxDestinyDraws）[ 100 ]                      │
+│    ▸ 富貴命  🀄  rare    1000/80/5/0    [10%] quota=10  ✓   │
+│    ▸ 慈悲命  🌸  common  500/100/10/0   [30%] quota=30  ✓   │
+│    ▸ 勞碌命  ⛏  common  2000/60/10/5   [60%] quota=60  ✓   │
+│    合計：100%（綠）／不為 100% 紅字警示但不擋儲存             │
+│    ⓘ 抽完 100 人後系統不擋玩家，第 101 人開始第二輪 cycle    │
 │                                                              │
 │ ─── 危險操作區（每個按鈕 3 步確認 modal）───                  │
 │ [重置會員明細] [刪除所有會員] [重置股價歷史]                  │
