@@ -332,7 +332,9 @@
 
 **啟用方式**：admin 在 `/admin/stations` 編輯關卡時勾選「關主可使用『股票加乘賣出』」（`allow_stock_sell_multiplier`）。
 
-**關主管理倍率**：在 `/captain/multipliers` 為已開放的關卡建立／編輯／停用倍率方案，每筆方案含名稱、金錢倍率、福分扣分倍率、排序、啟用 toggle。
+**關主管理倍率**：在 `/captain/multipliers` 為已開放的關卡建立／編輯／停用倍率方案，每筆方案含名稱、金錢倍率、福分扣分倍率、**前置道具條件（複選，AND 語意）**、排序、啟用 toggle。
+
+**前置道具條件**：每個倍率可指定玩家須持有的道具清單（多選）。**空清單** = 無前置條件，任何玩家都可選用；**有清單** = 玩家須**同時持有所有**指定道具才能套用此倍率（AND 語意，對應「投資技巧 + 拜財神 buff」這類疊加情境）。`/captain/scan` 賣股 modal 中會自動 disable 玩家未具備所有道具的倍率，並提示缺少哪些。後端 `captainSellStockWithMultiplier` 內以 atomic SQL 重驗，缺道具回 `MISSING_REQUIRED_ITEMS`。
 
 **關主執行流程**（`/captain/scan`）：
 1. 選關卡 → 掃玩家 QR 或手動輸入 ID

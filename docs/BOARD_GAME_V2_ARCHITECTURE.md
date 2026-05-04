@@ -199,6 +199,7 @@
 | `label` | TEXT | 方案名稱（例：「拜財神爺 buff」「投資技巧 + 拜財神」） |
 | `money_multiplier` | NUMERIC(5,2) `>= 0` | 金錢倍率（×N，profit 額外加成 = profit × (N - 1)） |
 | `blessing_penalty_multiplier` | NUMERIC(5,2) `>= 0` | 福分扣分倍率（基礎為「1K 獲利扣 0.1 福分」） |
+| `req_item_ids` | UUID[] DEFAULT '{}' | 前置條件：玩家須**全部具備**（AND 語意）才可選用此倍率；空陣列 = 無前置條件 |
 | `sort_order` | INTEGER DEFAULT 0 | UI 排序 |
 | `is_active` | BOOLEAN DEFAULT true | 是否啟用 |
 | `created_at` / `updated_at` | TIMESTAMPTZ | |

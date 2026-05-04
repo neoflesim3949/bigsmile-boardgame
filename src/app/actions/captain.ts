@@ -711,6 +711,7 @@ const sellMultiplierSchema = z.object({
   label: z.string().min(1).max(60),
   money_multiplier: z.number().min(0).max(99.99),
   blessing_penalty_multiplier: z.number().min(0).max(99.99),
+  req_item_ids: z.array(z.uuid()).max(20),
   sort_order: z.number().int().min(0).max(9999),
   is_active: z.boolean(),
 });
@@ -721,6 +722,7 @@ export interface SellMultiplierRow {
   label: string;
   money_multiplier: number;
   blessing_penalty_multiplier: number;
+  req_item_ids: string[];
   sort_order: number;
   is_active: boolean;
 }
@@ -733,6 +735,7 @@ export async function listMyStationSellMultipliers(): Promise<ActionResult<SellM
       `SELECT m.id, m.station_id, m.label,
               m.money_multiplier::float8 AS money_multiplier,
               m.blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
+              m.req_item_ids,
               m.sort_order, m.is_active
        FROM "StationSellMultiplier" m
        JOIN "Station" s ON s.id = m.station_id
@@ -762,13 +765,15 @@ export async function upsertStationSellMultiplier(
       const r = await query<SellMultiplierRow>(
         `UPDATE "StationSellMultiplier"
          SET label=$1, money_multiplier=$2, blessing_penalty_multiplier=$3,
-             sort_order=$4, is_active=$5, updated_at=now()
-         WHERE id=$6 AND station_id=$7
+             req_item_ids=$4,
+             sort_order=$5, is_active=$6, updated_at=now()
+         WHERE id=$7 AND station_id=$8
          RETURNING id, station_id, label,
                    money_multiplier::float8 AS money_multiplier,
                    blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
-                   sort_order, is_active`,
+                   req_item_ids, sort_order, is_active`,
         [data.label, data.money_multiplier, data.blessing_penalty_multiplier,
+         data.req_item_ids,
          data.sort_order, data.is_active, data.id, data.station_id],
       );
       if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '倍率方案不存在');
@@ -778,14 +783,15 @@ export async function upsertStationSellMultiplier(
     }
     const r = await query<SellMultiplierRow>(
       `INSERT INTO "StationSellMultiplier"
-        (station_id, label, money_multiplier, blessing_penalty_multiplier, sort_order, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)
+        (station_id, label, money_multiplier, blessing_penalty_multiplier,
+         req_item_ids, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, station_id, label,
                  money_multiplier::float8 AS money_multiplier,
                  blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
-                 sort_order, is_active`,
+                 req_item_ids, sort_order, is_active`,
       [data.station_id, data.label, data.money_multiplier, data.blessing_penalty_multiplier,
-       data.sort_order, data.is_active],
+       data.req_item_ids, data.sort_order, data.is_active],
     );
     revalidatePath('/captain');
     revalidatePath('/captain/multipliers');
@@ -897,16 +903,53 @@ export async function captainSellStockWithMultiplier(
       }
 
       // 驗 multiplier 屬於該 station 且啟用
-      const mR = await client.query<{ label: string; money_multiplier: number; blessing_penalty_multiplier: number }>(
+      const mR = await client.query<{
+        label: string;
+        money_multiplier: number;
+        blessing_penalty_multiplier: number;
+        req_item_ids: string[];
+      }>(
         `SELECT label,
                 money_multiplier::float8 AS money_multiplier,
-                blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier
+                blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
+                req_item_ids
          FROM "StationSellMultiplier"
          WHERE id = $1 AND station_id = $2 AND is_active = true`,
         [data.multiplierId, data.stationId],
       );
       const mult = mR.rows[0];
       if (!mult) throw new ActionError('NOT_FOUND', '倍率方案不存在或已停用');
+
+      // 前置條件：玩家須持有 req_item_ids 全部道具（AND 語意）
+      if (mult.req_item_ids.length > 0) {
+        const haveR = await client.query<{ have_all: boolean; missing_ids: string[]; missing_names: string[] }>(
+          `WITH need AS (
+             SELECT unnest($2::uuid[]) AS item_id
+           ),
+           have AS (
+             SELECT item_id FROM "PlayerItem" WHERE user_id = $1
+           ),
+           miss AS (
+             SELECT n.item_id
+             FROM need n
+             LEFT JOIN have h ON h.item_id = n.item_id
+             WHERE h.item_id IS NULL
+           )
+           SELECT (NOT EXISTS (SELECT 1 FROM miss)) AS have_all,
+                  COALESCE(array_agg(miss.item_id) FILTER (WHERE miss.item_id IS NOT NULL), '{}') AS missing_ids,
+                  COALESCE(array_agg(i.name) FILTER (WHERE i.id IS NOT NULL), '{}') AS missing_names
+           FROM miss
+           LEFT JOIN "Item" i ON i.id = miss.item_id`,
+          [data.targetUserId, mult.req_item_ids],
+        );
+        if (!haveR.rows[0]?.have_all) {
+          const names = haveR.rows[0]?.missing_names ?? [];
+          throw new ActionError(
+            'MISSING_REQUIRED_ITEMS',
+            names.length > 0 ? `玩家缺少必要道具：${names.join('、')}` : '玩家未持有此倍率所需道具',
+          );
+        }
+      }
 
       // 驗股票 + 玩家持股
       const stockR = await client.query<{ current_price: number; code: string; name: string; is_sellable: boolean }>(

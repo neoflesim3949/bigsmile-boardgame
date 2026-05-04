@@ -549,6 +549,7 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
           targetName={scanned.player.name}
           holding={sellTarget}
           multipliers={stationMultipliers}
+          playerItems={scanned.items}
           onClose={() => setSellTarget(null)}
           onSold={async (msg) => {
             showToast(true, msg);
@@ -726,18 +727,29 @@ function fmt(n: number): string {
 }
 
 function SellWithMultiplierModal({
-  stationId, targetUserId, targetName, holding, multipliers, onClose, onSold,
+  stationId, targetUserId, targetName, holding, multipliers, playerItems, onClose, onSold,
 }: {
   stationId: string;
   targetUserId: string;
   targetName: string;
   holding: CaptainPlayerHolding;
   multipliers: SellMultiplierRow[];
+  playerItems: PlayerScannedItem[];
   onClose: () => void;
   onSold: (msg: string) => void | Promise<void>;
 }) {
+  const playerItemIdSet = new Set(playerItems.map((it) => it.item_id));
+  const itemNameMap = new Map(playerItems.map((it) => [it.item_id, { name: it.name, icon: it.icon }]));
+  function unmetItemNames(reqIds: string[]): string[] {
+    return reqIds
+      .filter((iid) => !playerItemIdSet.has(iid))
+      .map((iid) => itemNameMap.get(iid)?.name ?? '未知道具');
+  }
+  // 第一個有資格的倍率作為預選
+  const firstEligible = multipliers.find((m) => unmetItemNames(m.req_item_ids).length === 0);
+
   const [shares, setShares] = useState(holding.shares.toString());
-  const [multId, setMultId] = useState<string>(multipliers[0]?.id ?? '');
+  const [multId, setMultId] = useState<string>(firstEligible?.id ?? '');
   const [busy, busyTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -751,6 +763,7 @@ function SellWithMultiplierModal({
   const bonus = profit > 0 ? Math.round(profit * (moneyMult - 1)) : 0;
   const totalMoney = proceeds + bonus;
   const blessingPenalty = profit > 0 ? Math.round((profit * blessingMult) / 10000) : 0;
+  const selectedUnmet = mult ? unmetItemNames(mult.req_item_ids) : [];
 
   function handleConfirm() {
     if (!mult) {
@@ -809,27 +822,47 @@ function SellWithMultiplierModal({
 
         <p className="text-xs text-zinc-500 mb-1.5">選擇倍率方案</p>
         <div className="space-y-1.5 mb-3">
-          {multipliers.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setMultId(m.id)}
-              className={`w-full text-left rounded-lg p-2 border transition-colors ${
-                multId === m.id
-                  ? 'bg-emerald-500/15 border-emerald-500/50'
-                  : 'bg-zinc-950 border-zinc-700 hover:bg-zinc-800'
-              }`}
-            >
-              <div className="flex justify-between items-center">
-                <span className="font-bold text-zinc-100 text-sm">{m.label}</span>
-                <span className="text-xs font-mono">
-                  <span className="text-emerald-400">×{m.money_multiplier}</span>
-                  <span className="text-zinc-600 mx-1">/</span>
-                  <span className="text-rose-400">×{m.blessing_penalty_multiplier}</span>
-                </span>
-              </div>
-            </button>
-          ))}
+          {multipliers.map((m) => {
+            const unmet = unmetItemNames(m.req_item_ids);
+            const eligible = unmet.length === 0;
+            return (
+              <button
+                key={m.id}
+                onClick={() => eligible && setMultId(m.id)}
+                disabled={!eligible}
+                className={`w-full text-left rounded-lg p-2 border transition-colors ${
+                  !eligible
+                    ? 'bg-zinc-950 border-zinc-800 opacity-50 cursor-not-allowed'
+                    : multId === m.id
+                      ? 'bg-emerald-500/15 border-emerald-500/50'
+                      : 'bg-zinc-950 border-zinc-700 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-zinc-100 text-sm">{m.label}</span>
+                  <span className="text-xs font-mono">
+                    <span className="text-emerald-400">×{m.money_multiplier}</span>
+                    <span className="text-zinc-600 mx-1">/</span>
+                    <span className="text-rose-400">×{m.blessing_penalty_multiplier}</span>
+                  </span>
+                </div>
+                {m.req_item_ids.length > 0 && (
+                  <p className={`text-[0.6875rem] mt-1 ${eligible ? 'text-zinc-500' : 'text-rose-400'}`}>
+                    {eligible
+                      ? `需求道具：${m.req_item_ids.length} 項（已具備 ✓）`
+                      : `缺少：${unmet.join('、')}`}
+                  </p>
+                )}
+              </button>
+            );
+          })}
         </div>
+
+        {selectedUnmet.length > 0 && (
+          <div className="bg-rose-950/40 border border-rose-700 text-rose-300 rounded-lg p-2 text-xs mb-3">
+            ⚠️ 玩家缺少：{selectedUnmet.join('、')}
+          </div>
+        )}
 
         <div className="bg-zinc-950 border border-emerald-700/40 rounded-lg p-3 mb-3 text-xs space-y-1">
           <p className="text-zinc-500 mb-1 font-bold">📊 結算預覽</p>
