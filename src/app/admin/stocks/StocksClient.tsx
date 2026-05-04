@@ -12,6 +12,7 @@ import {
   upsertStockScriptCell,
   deleteStockScriptCell,
   setRoundEvent,
+  setRoundForceLiquidation,
   deleteWholeRoundScript,
   type StockRow,
   type StockPayload,
@@ -79,6 +80,17 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
         setScripts((s) => ({
           ...s,
           events: { ...s.events, [round]: text },
+        }));
+      } else showToast(false, r.error?.message ?? '');
+    });
+  }
+
+  function handleForceLiqSave(round: number, ratio: number) {
+    setRoundForceLiquidation(round, ratio).then((r) => {
+      if (r.ok) {
+        setScripts((s) => ({
+          ...s,
+          forceLiquidationRatios: { ...s.forceLiquidationRatios, [round]: ratio },
         }));
       } else showToast(false, r.error?.message ?? '');
     });
@@ -240,7 +252,11 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
                     <span className="text-xs text-zinc-500 font-normal">{s.name}</span>
                   </th>
                 ))}
-                <th className="p-4 font-medium pl-8 w-[400px]">事件跑馬燈（推進回合時推到看板 5 分鐘）</th>
+                <th className="p-4 font-medium pl-8 w-32 text-center text-rose-400">
+                  強制平倉<br />
+                  <span className="text-xs text-zinc-500 font-normal">% 全域 $0 售出</span>
+                </th>
+                <th className="p-4 font-medium pl-4 w-[360px]">事件跑馬燈（推進回合時推到看板 5 分鐘）</th>
                 <th className="p-2 w-12"></th>
               </tr>
             </thead>
@@ -265,7 +281,14 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
                         />
                       </td>
                     ))}
-                    <td className="p-2 pl-8 pr-4">
+                    <td className="p-2 pl-8 text-center">
+                      <ForceLiquidationCell
+                        round={round}
+                        ratio={scripts.forceLiquidationRatios[round] ?? 0}
+                        onSave={handleForceLiqSave}
+                      />
+                    </td>
+                    <td className="p-2 pl-4 pr-4">
                       <input
                         type="text"
                         defaultValue={scripts.events[round] ?? ''}
@@ -309,6 +332,39 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
           <span className="text-sm">{toast.msg}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function ForceLiquidationCell({
+  round, ratio, onSave,
+}: {
+  round: number;
+  ratio: number;
+  onSave: (round: number, ratio: number) => void;
+}) {
+  const [value, setValue] = useState<string>(ratio > 0 ? String(ratio) : '');
+  const cls = ratio > 0 ? 'text-rose-400 font-bold' : 'text-zinc-500';
+  return (
+    <div className={`flex items-stretch mx-auto w-[80px] bg-zinc-950 border ${ratio > 0 ? 'border-rose-700/60' : 'border-zinc-800/50'} rounded focus-within:border-rose-500 overflow-hidden transition-colors`}>
+      <input
+        type="number"
+        min="0"
+        max="100"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => {
+          const n = Math.max(0, Math.min(100, Math.floor(Number(value) || 0)));
+          if (n !== ratio) onSave(round, n);
+          setValue(n > 0 ? String(n) : '');
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        placeholder="0"
+        className={`w-full bg-transparent p-1.5 text-center text-sm outline-none ${cls}`}
+      />
+      <span className="px-1.5 flex items-center text-xs text-zinc-500 border-l border-zinc-800/50 bg-zinc-900">%</span>
     </div>
   );
 }

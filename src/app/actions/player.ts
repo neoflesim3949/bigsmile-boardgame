@@ -989,6 +989,10 @@ function extractDelta(txType: string, payload: Record<string, unknown>, type: Hi
     }
     return 0;
   }
+  if (txType === 'forced_liquidation') {
+    // 強制平倉以 $0 售出，金錢不變動；其他指標也不影響
+    return 0;
+  }
   if (txType === 'quick_action') {
     const d = payload['delta'] as Record<string, number> | undefined;
     if (d && typeof d[type] === 'number') return d[type];

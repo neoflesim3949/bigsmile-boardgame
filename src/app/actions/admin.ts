@@ -690,6 +690,8 @@ export interface StockScriptCell {
 export interface StockRoundScriptsView {
   rounds: number[];
   events: Record<number, string>;
+  /** 每回合強制平倉比例（0–100），0 = 不平倉 */
+  forceLiquidationRatios: Record<number, number>;
   cells: Record<string, StockScriptCell>; // key: `${round}_${stock_id}`
 }
 
@@ -700,8 +702,9 @@ export async function listStockScripts(): Promise<ActionResult<StockRoundScripts
       `SELECT round, stock_id, change_type, change_value
        FROM "StockRoundScript" ORDER BY round ASC`,
     );
-    const eventsR = await query<{ round: number; event_text: string }>(
-      `SELECT round, event_text FROM "StockRoundEvent" ORDER BY round ASC`,
+    const eventsR = await query<{ round: number; event_text: string; force_liquidation_ratio: number }>(
+      `SELECT round, event_text, force_liquidation_ratio
+       FROM "StockRoundEvent" ORDER BY round ASC`,
     );
     const cells: Record<string, StockScriptCell> = {};
     const roundSet = new Set<number>();
@@ -710,13 +713,16 @@ export async function listStockScripts(): Promise<ActionResult<StockRoundScripts
       roundSet.add(c.round);
     }
     const events: Record<number, string> = {};
+    const forceLiquidationRatios: Record<number, number> = {};
     for (const e of eventsR.rows) {
       events[e.round] = e.event_text;
+      forceLiquidationRatios[e.round] = e.force_liquidation_ratio;
       roundSet.add(e.round);
     }
     return ok({
       rounds: [...roundSet].sort((a, b) => a - b),
       events,
+      forceLiquidationRatios,
       cells,
     });
   } catch (err) {
@@ -772,14 +778,58 @@ export async function setRoundEvent(round: number, text: string): Promise<Action
   try {
     await requireRole('admin');
     if (!Number.isInteger(round) || round <= 0) throw new ActionError('INVALID_INPUT', '');
-    if (text.trim() === '') {
-      await query(`DELETE FROM "StockRoundEvent" WHERE round = $1`, [round]);
+    const trimmed = text.trim();
+    if (trimmed === '') {
+      // 文字為空但仍可能有強制平倉比例 → 不刪整 row，只清 text
+      await query(
+        `UPDATE "StockRoundEvent" SET event_text = '', updated_at = now() WHERE round = $1`,
+        [round],
+      );
+      // 若該回合 ratio 也是 0，整 row 沒意義就刪
+      await query(
+        `DELETE FROM "StockRoundEvent" WHERE round = $1 AND event_text = '' AND force_liquidation_ratio = 0`,
+        [round],
+      );
     } else {
       await query(
         `INSERT INTO "StockRoundEvent" (round, event_text)
          VALUES ($1, $2)
          ON CONFLICT (round) DO UPDATE SET event_text = EXCLUDED.event_text, updated_at = now()`,
-        [round, text.slice(0, 200)],
+        [round, trimmed.slice(0, 200)],
+      );
+    }
+    revalidatePath('/admin/stocks');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * 設定該回合的強制平倉比例（0–100）。0 = 不平倉。
+ * 與 event_text 共用 StockRoundEvent row（PRIMARY KEY round），UPSERT 邏輯。
+ */
+export async function setRoundForceLiquidation(round: number, ratio: number): Promise<ActionResult<null>> {
+  try {
+    await requireRole('admin');
+    if (!Number.isInteger(round) || round <= 0) throw new ActionError('INVALID_INPUT', '');
+    const r = Math.max(0, Math.min(100, Math.floor(ratio)));
+    if (r === 0) {
+      // 0 → 若該 row 也沒事件文字就刪掉，否則 UPDATE
+      await query(
+        `UPDATE "StockRoundEvent" SET force_liquidation_ratio = 0, updated_at = now() WHERE round = $1`,
+        [round],
+      );
+      await query(
+        `DELETE FROM "StockRoundEvent" WHERE round = $1 AND event_text = '' AND force_liquidation_ratio = 0`,
+        [round],
+      );
+    } else {
+      await query(
+        `INSERT INTO "StockRoundEvent" (round, event_text, force_liquidation_ratio)
+         VALUES ($1, '', $2)
+         ON CONFLICT (round) DO UPDATE SET force_liquidation_ratio = EXCLUDED.force_liquidation_ratio, updated_at = now()`,
+        [round, r],
       );
     }
     revalidatePath('/admin/stocks');

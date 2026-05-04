@@ -305,14 +305,17 @@
 
 > 管理員在 `/admin/stocks` 的「股市大盤回合腳本總表」設定。`tickRound` 推進回合時：若該回合在此表有 row → 套用腳本；否則 fallback 為 `AppSettings.StockPriceRule` 隨機規則（預設 ±5%）。
 
-#### `StockRoundEvent` — 該回合的看板跑馬燈文字
+#### `StockRoundEvent` — 該回合的看板跑馬燈文字 + 強制平倉比例
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | `round` | INTEGER PK | |
 | `event_text` | TEXT | 推進到此回合時自動推到看板的跑馬燈文字 |
+| `force_liquidation_ratio` | INTEGER `CHECK (BETWEEN 0 AND 100)` DEFAULT 0 | **強制平倉比例 %**（0 = 不平倉）— 所有玩家持股按此比例強制以 $0 售出 |
 | `updated_at` | TIMESTAMPTZ | |
 
-> `tickRound` 推進至該回合時，若 `event_text` 不為空，自動 UPDATE `BoardConfig.marquee_text` 並設定 `marquee_until = now() + 5 minutes`。
+> `tickRound` 推進至該回合時：
+> 1. 若 `event_text` 不為空 → UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 minutes`
+> 2. 若 `force_liquidation_ratio > 0` → 對所有 `StockHolding` 執行 `shares -= FLOOR(shares × ratio / 100)`（賣價 $0、不發回金錢、`avg_cost` 不變），剩餘 0 則 DELETE row。每筆寫 `Transaction tx_type='forced_liquidation'`
 
 ### 3.4 活動看板相關
 
@@ -357,7 +360,7 @@
 | `id` | BIGSERIAL PK | |
 | `user_id` | TEXT FK→Account | 受影響玩家 |
 | `actor_user_id` | TEXT NULL FK→Account | 執行者（關主／管理員／NULL=玩家自己） |
-| `tx_type` | TEXT | `quick_action` / `item_grant` / `exchange` / `transfer` / `stock_buy` / `stock_sell` / `settings_update` / `account_update` / `rebirth` / `bank_borrow` / `bank_repay` / `bank_interest` / `final_scoring` |
+| `tx_type` | TEXT | `quick_action` / `item_grant` / `exchange` / `transfer` / `stock_buy` / `stock_sell` / `forced_liquidation` / `settings_update` / `account_update` / `rebirth` / `bank_borrow` / `bank_repay` / `bank_interest` / `final_scoring` / `round_tick` / `danger_zone_reset` |
 | `payload` | JSONB | 各 type 的細節（金額、商品 ID、轉出/轉入對象…） |
 | `created_at` | TIMESTAMPTZ | |
 
@@ -640,7 +643,7 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `updateGameSettings(payload)` | 統一更新參數設定（活動時間、匯率、比分權重、新手參數、重生參數；批次 upsert `AppSettings`） | 無 |
 | `upsertStock(payload)` | 新增/編輯股市商品 | 無 |
 | `setStockPrice(stockId, price)` | 即時手動調整單檔股價（不等回合，自動寫入歷史） | pg tx |
-| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — **前置 guard**：Tx1 開頭驗 `BoardGameEnabled === 'true'` && `final_scoring_triggered_at IS NULL`，不符直接 `FORBIDDEN`。Tx1 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory` + 若 `StockRoundEvent` 有此回合文字則 UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min` + `BoardConfig.current_round += 1`；**第 1 回合**（newRound === 1）UPSERT `AppSettings TourMode = 'false'`（admin 從 demo 進入正式遊戲，自動關閉導覽模式以解鎖玩家寫入）；寫 `round_tick` Transaction 紀錄。Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（按 balance/principal 比例算）。30 秒 debounce（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
+| `tickRound()` | **主持人按「下一回合」**：拆兩個短 pg tx 完成 — **前置 guard**：Tx1 開頭驗 `BoardGameEnabled === 'true'` && `final_scoring_triggered_at IS NULL`，不符直接 `FORBIDDEN`。Tx1 流程：(a) 更新股價（**先查 `StockRoundScript` 是否有此回合的腳本**；若有則依腳本 `percent`/`fixed` 套用；無則 fallback `AppSettings.StockPriceRule` 隨機 ±N%）+ 寫 `StockHistory`；(b) 若 `StockRoundEvent.event_text` 有文字 → UPDATE `BoardConfig.marquee_text` + `marquee_until = now() + 5 min`；(c) **強制平倉**（若 `force_liquidation_ratio > 0`）— 單條 CTE SQL 對所有 StockHolding 套 `FLOOR(shares × ratio / 100)`，賣價 $0 / `avg_cost` 不變 / 剩 0 則 DELETE / 每筆寫 `forced_liquidation` Transaction；(d) `BoardConfig.current_round += 1`；(e) **第 1 回合**（newRound === 1）UPSERT `AppSettings TourMode = 'false'`；(f) 寫 `round_tick` Transaction 紀錄。Tx2 用**單條批次** UPDATE PlayerStats + INSERT…SELECT Transaction 結算所有借款玩家利息（按 balance/principal 比例算）。30 秒 debounce（atomic SQL `WHERE last_tick_at < now() - interval '30 seconds'`） | 兩個 pg tx |
 | `triggerFinalScoring()` | 觸發終局結算：寫 `BoardConfig.final_scoring_triggered_at = now()`；之後玩家寫入全部被 `assertNotDuringFinalScoring` 擋；看板自動切到排行榜畫面。**不可復原**（要再玩請走 `restartGameCycle`） | pg tx |
 | `restartGameCycle()` | **重啟新一場（核重置）**：在 pg tx 內清空：(1) PlayerStats 四項數值 / 命格 / 重生計數 / bank_loan / loan_updated_at / last_manual_refresh_at；(2) StockHolding / PlayerLoan / PlayerItem；(3) StockHistory / StockRoundScript / StockRoundEvent；(4) StationUsage / QuickActionUsage、Station 與 QuickAction 的 global_use_count；(5) BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at / featured_stock_ids）；(6) Event.is_active = false（保留事件定義但全部停用）。tx 外重設 AppSettings 旗標（`BoardGameEnabled` / `BoardGameStartedAt` / `CardDrawMode` / `TourMode` 全部 false/空）。**保留**：Account / Stock 商品定義（current_price 保留）/ Item / Station / QuickAction / InitialValueTemplate / ExchangeOption / BankLoanOption / Transaction 稽核。Dashboard 已計分時把「已計分」按鈕換成此功能，**前端強制 5 次確認彈窗** | pg tx |
 | `setStockPriceRule(rule)` | 設定 `AppSettings.StockPriceRule`（下回合用的漲跌規則） | 無 |
@@ -1876,11 +1879,14 @@ npm run lint     # ESLint 檢查
 │ └──────┘ └──────┘ └──────┘                                             │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ 回合腳本總表（每 cell 內聯編輯，第一欄 sticky）                           │
-│ 回合│事件                  │ BTC      │ TSMC     │ CCAI               │
-│  1 │牛市開盤              │ +5%      │ +3%      │ +10%              │
-│  2 │科技股爆發            │ +2%      │ +8%      │ +15%              │
-│  3 │（無事件）             │ -3%      │ -5%      │ +5%               │
+│ 回合│ BTC      │ TSMC     │ CCAI    │ 強制平倉% │ 事件跑馬燈          │
+│  1 │ +5%      │ +3%      │ +10%    │   [ 0  ] │ 牛市開盤            │
+│  2 │ +2%      │ +8%      │ +15%    │   [ 0  ] │ 科技股爆發          │
+│  3 │ -3%      │ -5%      │ +5%     │   [ 0  ] │（無事件）            │
+│  6 │ -20%     │ -30%     │ +60%    │   [ 50 ] │ 金融海嘯（半倉強平）│
 │ ... │（最多 12 回合）       │          │          │                    │
+│                                                                        │
+│ 「強制平倉 %」rose 色強調：推進該回合時，所有玩家持股按比例強制以 $0 賣出 │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 

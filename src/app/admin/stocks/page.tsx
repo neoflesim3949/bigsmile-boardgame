@@ -8,7 +8,7 @@ export default async function StocksAdminPage() {
   return (
     <StocksClient
       initialStocks={stocks.ok ? stocks.data! : []}
-      initialScripts={scripts.ok ? scripts.data! : { rounds: [], events: {}, cells: {} }}
+      initialScripts={scripts.ok ? scripts.data! : { rounds: [], events: {}, forceLiquidationRatios: {}, cells: {} }}
     />
   );
 }

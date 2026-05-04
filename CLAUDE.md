@@ -197,6 +197,16 @@ assertPlayerAlive(stats)   // ← 統一 guard
   - `fixed = 0`：該回合股價直接歸零（暴跌劇情）。後端 `buyStock` 加 guard 拒絕 `price <= 0` 的買單；前端股市買進按鈕顯示「停止交易」disabled
   - `percent = 0`：該回合股價鎖定**不變動**（與「無腳本走 ±5% 隨機」不同）
   - 前端 admin 編輯 cell：值為 0 **不該觸發 cell 刪除**，只有空值或非數字才刪
+- **強制平倉事件**：`StockRoundEvent.force_liquidation_ratio`（0–100）每回合可設一個全域比例。`tickRound` Tx1 內在股價更新後執行：
+  - 對所有 `StockHolding`：`shares_to_sell = FLOOR(shares × ratio / 100)`
+  - 賣價固定 **$0**（不依當前 current_price，事件性懲罰），玩家完全沒拿回錢
+  - `avg_cost` **不變動**（剩下的股維持原均價）
+  - 剩餘 = 0 → DELETE row；否則 UPDATE shares
+  - 寫 `Transaction tx_type='forced_liquidation'`，payload `{round, ratio, event_text, stock_id, stock_code, stock_name, shares_sold, money_gain: 0}`
+  - 死亡玩家也被平倉（無差別）；TourMode / 終局結算因 `tickRound` 已被 guard 擋
+  - **單條 CTE SQL** 完成 SELECT + DELETE + UPDATE + INSERT 寫紀錄（無 N+1）
+  - admin 在 `/admin/stocks` 回合腳本總表「事件跑馬燈」欄前面的「強制平倉 %」input 設定（rose 色強調危險）
+  - 玩家歷史明細顯示：「因『事件名』股票『BTC 比特幣』被強制售出 ×N @ $0」，金錢 delta = 0
 - **即時跑馬燈廣播**：textarea + 發送 / 清除 → `publishMarquee` / `clearMarquee`，TTL 上限由 `BoardMarqueeMaxMinutes` 控制
 - **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上。**「自訂」用內建 modal**（不要用 `window.prompt` — mobile Safari / 部分桌面 Chrome 會靜默擋）。**前後端必須同時套用倍率且公式一致**：`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用 `effective_per_unit = round(money_gain_per_unit × mult)`、`total = effective_per_unit × units`（先 round 再乘，避免「顯示 +200、實際 +199」的 rounding 爭議）。**禁止**只在後端套倍率不在前端 list 套，否則玩家看到的「將獲得」與實際入帳會不一致
 

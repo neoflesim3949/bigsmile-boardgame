@@ -22,6 +22,7 @@ const TX_TYPE_LABEL: Record<string, string> = {
   stock_buy: '買進股票',
   stock_sell: '賣出股票',
   quick_action: '關主套用快捷',
+  forced_liquidation: '強制平倉',
   item_grant: '取得道具',
   account_update: '帳號變更',
   settings_update: '系統設定變更',
@@ -88,6 +89,15 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
       const counterparty = s(payload.counterparty_name) ?? s(payload.to_user_name) ?? s(payload.from_user_name);
       const direction = payload.direction === 'out' ? '轉出至' : payload.direction === 'in' ? '收到自' : '轉帳';
       return counterparty ? `${direction} ${counterparty}` : null;
+    }
+    case 'forced_liquidation': {
+      const event = s(payload.event_text) || '系統事件';
+      const code = s(payload.stock_code);
+      const name = s(payload.stock_name);
+      const sold = n(payload.shares_sold);
+      if (sold == null) return null;
+      const stock = code && name ? `${code} ${name}` : (code || name || '股票');
+      return `因「${event}」股票「${stock}」被強制售出 ×${sold} @ $0`;
     }
     case 'exchange': {
       const units = n(payload.units);

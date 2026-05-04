@@ -104,12 +104,13 @@ export async function tickRound(): Promise<
         );
       }
 
-      // 推送本回合事件文字至看板（marquee_until = 5 分鐘）
-      const ev = await client.query<{ event_text: string }>(
-        `SELECT event_text FROM "StockRoundEvent" WHERE round = $1`,
+      // 推送本回合事件文字至看板（marquee_until = 5 分鐘）+ 拉強制平倉比例
+      const ev = await client.query<{ event_text: string; force_liquidation_ratio: number }>(
+        `SELECT event_text, force_liquidation_ratio FROM "StockRoundEvent" WHERE round = $1`,
         [newRound],
       );
       const evText = ev.rows[0]?.event_text?.trim();
+      const forceLiqRatio = ev.rows[0]?.force_liquidation_ratio ?? 0;
       if (evText) {
         await client.query(
           `UPDATE "BoardConfig"
@@ -118,6 +119,52 @@ export async function tickRound(): Promise<
                updated_at = now()
            WHERE id = 1`,
           [evText],
+        );
+      }
+
+      // 強制平倉（事件性懲罰）：所有玩家持股按 ratio 強制以 $0 售出
+      // 規格詳見 CLAUDE.md「強制平倉」/ ARCH §5 tickRound
+      // 賣價 0、不發回金錢、只動 shares + 寫 Transaction
+      if (forceLiqRatio > 0) {
+        await client.query(
+          `WITH liquidated AS (
+             SELECT sh.user_id, sh.stock_id, s.code AS stock_code, s.name AS stock_name,
+                    FLOOR(sh.shares * $1::int / 100)::int AS shares_sold,
+                    sh.shares AS shares_before
+             FROM "StockHolding" sh
+             JOIN "Stock" s ON s.id = sh.stock_id
+             WHERE FLOOR(sh.shares * $1::int / 100) > 0
+           ),
+           del AS (
+             DELETE FROM "StockHolding" sh
+             USING liquidated l
+             WHERE sh.user_id = l.user_id AND sh.stock_id = l.stock_id
+               AND l.shares_sold = l.shares_before
+             RETURNING 1
+           ),
+           upd AS (
+             UPDATE "StockHolding" sh
+             SET shares = sh.shares - l.shares_sold,
+                 updated_at = now()
+             FROM liquidated l
+             WHERE sh.user_id = l.user_id AND sh.stock_id = l.stock_id
+               AND l.shares_sold < l.shares_before
+             RETURNING 1
+           )
+           INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+           SELECT user_id, NULL, 'forced_liquidation',
+                  jsonb_build_object(
+                    'round', $2::int,
+                    'ratio', $1::int,
+                    'event_text', $3::text,
+                    'stock_id', stock_id,
+                    'stock_code', stock_code,
+                    'stock_name', stock_name,
+                    'shares_sold', shares_sold,
+                    'money_gain', 0
+                  )
+           FROM liquidated`,
+          [forceLiqRatio, newRound, evText || null],
         );
       }
 
