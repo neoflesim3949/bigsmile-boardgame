@@ -118,16 +118,19 @@ export default function BoardClient({ initial, token }: Props) {
               <div className="w-4 h-4 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
               <span className="text-lg font-medium text-zinc-300">已連線</span>
             </div>
-            <button
-              onClick={() => setUserOverride(!isFinal)}
-              className={`px-4 py-2 rounded-full font-bold border transition-colors shadow-lg ${
-                isFinal
-                  ? 'bg-amber-500 text-zinc-950 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
-                  : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
-              }`}
-            >
-              {isFinal ? '返回常規模式' : '🏆 展開最終榜單'}
-            </button>
+            {/* 「展開最終榜單」按鈕只在遊戲結束（serverIsFinal=true）才出現；活動進行中不允許 preview */}
+            {serverIsFinal && (
+              <button
+                onClick={() => setUserOverride(!isFinal)}
+                className={`px-4 py-2 rounded-full font-bold border transition-colors shadow-lg ${
+                  isFinal
+                    ? 'bg-amber-500 text-zinc-950 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                    : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+                }`}
+              >
+                {isFinal ? '返回常規模式' : '🏆 展開最終榜單'}
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -205,8 +208,9 @@ export default function BoardClient({ initial, token }: Props) {
           </div>
         )}
 
-        <div className={`${isFinal ? 'w-full' : 'w-[14%]'} glass-panel rounded-3xl ${isFinal ? 'p-8' : 'p-4'} flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500`}>
-          {isFinal && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500"></div>}
+        {isFinal && (
+        <div className="w-full glass-panel rounded-3xl p-8 flex flex-col border border-zinc-800 relative overflow-hidden shadow-[0_0_30px_rgba(245,158,11,0.05)] transition-all duration-500">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500"></div>
           <h2 className={`font-bold text-zinc-400 pl-4 border-l-4 border-amber-500 ${isFinal ? 'mb-6 text-4xl py-2' : 'mb-4 text-2xl'} uppercase tracking-widest flex justify-between items-end`}>
             <span className="text-zinc-100">🏆 風雲榜</span>
             {isFinal && <span className="text-xl font-normal text-zinc-500 normal-case tracking-normal">
@@ -221,6 +225,8 @@ export default function BoardClient({ initial, token }: Props) {
                   <tr className="text-zinc-500 border-b-2 border-zinc-800">
                     <th className="pb-4 font-normal text-center w-20">排名</th>
                     <th className="pb-4 font-normal pl-4">姓名</th>
+                    <th className="pb-4 font-normal pl-2">命格</th>
+                    <th className="pb-4 font-normal pl-2">狀態</th>
                     <SortTh title="金錢" color="amber" sortKey="money" active={sortKey === 'money'} dir={sortDir} onClick={toggleSort} />
                     <SortTh title="福份" color="teal" sortKey="blessing" active={sortKey === 'blessing'} dir={sortDir} onClick={toggleSort} />
                     <SortTh title="健康" color="rose" sortKey="health" active={sortKey === 'health'} dir={sortDir} onClick={toggleSort} />
@@ -233,7 +239,7 @@ export default function BoardClient({ initial, token }: Props) {
               <tbody className="text-zinc-200">
                 {(isFinal ? lbFinalSorted.length : lbLive.length) === 0 ? (
                   <tr>
-                    <td colSpan={isFinal ? 8 : 2} className="py-12 text-center text-zinc-600">尚無玩家資料</td>
+                    <td colSpan={isFinal ? 10 : 2} className="py-12 text-center text-zinc-600">尚無玩家資料</td>
                   </tr>
                 ) : isFinal ? (
                   lbFinalSorted.map((r) => {
@@ -256,6 +262,20 @@ export default function BoardClient({ initial, token }: Props) {
                         </td>
                         <td className={`py-4 pl-4 font-bold text-2xl tracking-wide ${rank <= 3 ? 'text-zinc-100' : 'text-zinc-400'}`}>
                           {r.name}
+                        </td>
+                        <td className="py-4 pl-2">
+                          {r.destiny_name ? (
+                            <span className={`text-base px-2.5 py-1 rounded-full border ${themeBadge(r.destiny_theme)}`}>
+                              {r.destiny_name}
+                            </span>
+                          ) : <span className="text-zinc-600">—</span>}
+                        </td>
+                        <td className="py-4 pl-2">
+                          {r.karma_band_label ? (
+                            <span className={`text-base px-2.5 py-1 rounded-full border ${themeBadge(r.karma_band_theme)}`}>
+                              {r.karma_band_label}
+                            </span>
+                          ) : <span className="text-zinc-600">—</span>}
                         </td>
                         <td className="py-4 text-right font-bold text-amber-400">{r.money?.toLocaleString() ?? 0}</td>
                         <td className="py-4 text-right text-teal-400 font-medium">{r.blessing ?? 0}</td>
@@ -297,6 +317,7 @@ export default function BoardClient({ initial, token }: Props) {
             </table>
           </div>
         </div>
+        )}
       </main>
 
       <footer className="h-[15vh] shrink-0 flex flex-col bg-zinc-900/80 border-t border-zinc-800">
@@ -342,6 +363,19 @@ export default function BoardClient({ initial, token }: Props) {
 }
 
 type FinalSortKey = 'final_score' | 'money' | 'blessing' | 'health' | 'karma' | 'rebirth_count';
+
+/** 6 色系 badge palette — 命格 / 狀態欄位用，與玩家首頁卡片同色系 */
+function themeBadge(theme: string | null | undefined): string {
+  switch (theme) {
+    case 'amber': return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+    case 'teal': return 'bg-teal-500/15 text-teal-400 border-teal-500/30';
+    case 'purple': return 'bg-purple-500/15 text-purple-400 border-purple-500/30';
+    case 'rose': return 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+    case 'sky': return 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+    case 'zinc':
+    default: return 'bg-zinc-700/30 text-zinc-300 border-zinc-600/40';
+  }
+}
 
 function SortTh({
   title, color, emphasized = false, sortKey, active, dir, onClick,

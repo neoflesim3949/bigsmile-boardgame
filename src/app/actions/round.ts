@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { withTx } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
+import { recomputeAllPlayerScores } from '@/lib/score';
 
 /**
  * tickRound：主持人按「下一回合」。
@@ -287,6 +288,8 @@ export async function tickRound(): Promise<
          )
          SELECT DISTINCT user_id FROM updated_ps`,
       );
+      // 重算所有玩家 final_score（反映 Tx1 業力影響 / 強制平倉 + Tx2 利息結算後的最新狀態）
+      await recomputeAllPlayerScores(client);
       return settled.rowCount ?? 0;
     });
 

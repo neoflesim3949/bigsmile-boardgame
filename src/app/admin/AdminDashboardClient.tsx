@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useState, useTransition, useEffect } from 'react';
 import {
-  Users, MonitorPlay, ArrowUpDown, Eye, Sparkles, CheckCircle2, Lock,
-  AlertCircle, RefreshCw, AlertTriangle, X,
+  Users, MonitorPlay, ArrowUpDown, ArrowUp, ArrowDown, Eye, Sparkles, CheckCircle2, Lock,
+  AlertCircle, RefreshCw, AlertTriangle, X, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import {
   setQuickFlag,
@@ -36,6 +36,35 @@ export default function AdminDashboardClient({ initial }: Props) {
   const [marqueeMins, setMarqueeMins] = useState(60);
   const [busy, busyTransition] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // 風雲榜排序 + 分頁狀態
+  type SortKey = 'final_score' | 'money' | 'blessing' | 'health' | 'karma' | 'rebirth_count';
+  const [lbSortKey, setLbSortKey] = useState<SortKey>('final_score');
+  const [lbSortDir, setLbSortDir] = useState<'desc' | 'asc'>('desc');
+  const [lbPageSize, setLbPageSize] = useState<20 | 50 | 100>(20);
+  const [lbPage, setLbPage] = useState(0);
+  function toggleLbSort(key: SortKey) {
+    if (lbSortKey === key) {
+      setLbSortDir(lbSortDir === 'desc' ? 'asc' : 'desc');
+    } else {
+      setLbSortKey(key);
+      setLbSortDir('desc');
+    }
+    setLbPage(0);
+  }
+  // 名次永遠跟著 final_score 由大到小（V2 §8 名次固定原則），不隨當前排序欄位變化
+  const lbWithRank = data.leaderboard
+    .slice()
+    .sort((a, b) => (b.final_score ?? 0) - (a.final_score ?? 0))
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+  const lbSorted = lbWithRank.slice().sort((a, b) => {
+    const av = a[lbSortKey] ?? 0;
+    const bv = b[lbSortKey] ?? 0;
+    return lbSortDir === 'desc' ? bv - av : av - bv;
+  });
+  const lbTotal = lbSorted.length;
+  const lbPageCount = Math.max(1, Math.ceil(lbTotal / lbPageSize));
+  const lbPageRows = lbSorted.slice(lbPage * lbPageSize, (lbPage + 1) * lbPageSize);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -425,21 +454,39 @@ export default function AdminDashboardClient({ initial }: Props) {
         </div>
       </div>
 
-      {/* Row 3: Leaderboard */}
+      {/* Row 3: 風雲榜 */}
       <div className="glass-panel rounded-2xl p-6">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
           <h3 className="text-lg font-semibold text-zinc-300 flex items-center gap-2">
-            <Users className="w-5 h-5 text-amber-500" /> 財富排行榜
-            <span className="text-xs text-zinc-500 font-normal">（前 {data.leaderboard.length} 名）</span>
+            <Users className="w-5 h-5 text-amber-500" /> 風雲榜
+            <span className="text-xs text-zinc-500 font-normal">（共 {lbTotal} 人）</span>
           </h3>
-          <button
-            onClick={() => busyTransition(reload)}
-            disabled={busy}
-            className="text-zinc-500 hover:text-amber-400 text-xs flex items-center gap-1"
-          >
-            <RefreshCw className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} />
-            重新整理
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 text-xs">
+              <span className="text-zinc-500 mr-1">每頁</span>
+              {([20, 50, 100] as const).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => { setLbPageSize(n); setLbPage(0); }}
+                  className={`px-2 py-1 rounded border transition-colors ${
+                    lbPageSize === n
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                      : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => busyTransition(reload)}
+              disabled={busy}
+              className="text-zinc-500 hover:text-amber-400 text-xs flex items-center gap-1"
+            >
+              <RefreshCw className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`} />
+              重新整理
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -448,24 +495,40 @@ export default function AdminDashboardClient({ initial }: Props) {
               <tr className="text-zinc-500 text-sm border-b border-zinc-800">
                 <th className="pb-3 pl-2">排名</th>
                 <th className="pb-3">姓名</th>
-                <ColTh title="金錢" color="amber" />
-                <ColTh title="福份" color="teal" />
-                <ColTh title="健康" color="rose" />
-                <ColTh title="業力" color="purple" />
-                <ColTh title="重生次數" color="zinc" />
-                <ColTh title="最終分數" color="white" />
+                <th className="pb-3">命格</th>
+                <th className="pb-3">狀態</th>
+                <SortColTh title="金錢" color="amber" sortKey="money" active={lbSortKey === 'money'} dir={lbSortDir} onClick={toggleLbSort} />
+                <SortColTh title="福份" color="teal" sortKey="blessing" active={lbSortKey === 'blessing'} dir={lbSortDir} onClick={toggleLbSort} />
+                <SortColTh title="健康" color="rose" sortKey="health" active={lbSortKey === 'health'} dir={lbSortDir} onClick={toggleLbSort} />
+                <SortColTh title="業力" color="purple" sortKey="karma" active={lbSortKey === 'karma'} dir={lbSortDir} onClick={toggleLbSort} />
+                <SortColTh title="重生次數" color="zinc" sortKey="rebirth_count" active={lbSortKey === 'rebirth_count'} dir={lbSortDir} onClick={toggleLbSort} />
+                <SortColTh title="最終分數" color="white" sortKey="final_score" active={lbSortKey === 'final_score'} dir={lbSortDir} onClick={toggleLbSort} />
               </tr>
             </thead>
             <tbody className="text-zinc-200 text-sm">
-              {data.leaderboard.length === 0 ? (
-                <tr><td colSpan={8} className="py-8 text-center text-zinc-500">尚無玩家資料</td></tr>
+              {lbPageRows.length === 0 ? (
+                <tr><td colSpan={10} className="py-8 text-center text-zinc-500">尚無玩家資料</td></tr>
               ) : (
-                data.leaderboard.map((row, i) => (
+                lbPageRows.map((row) => (
                   <tr key={row.user_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
-                    <td className="py-4 pl-2 font-bold text-amber-500">#{i + 1}</td>
+                    <td className="py-4 pl-2 font-bold text-amber-500">#{row.rank}</td>
                     <td className="py-4 font-medium">
                       {row.name}
                       <span className="text-xs text-zinc-500 ml-2 font-mono">{row.user_id}</span>
+                    </td>
+                    <td className="py-4">
+                      {row.destiny_name ? (
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${themeBadge(row.destiny_theme)}`}>
+                          {row.destiny_name}
+                        </span>
+                      ) : <span className="text-xs text-zinc-600">—</span>}
+                    </td>
+                    <td className="py-4">
+                      {row.karma_band_label ? (
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${themeBadge(row.karma_band_theme)}`}>
+                          {row.karma_band_label}
+                        </span>
+                      ) : <span className="text-xs text-zinc-600">—</span>}
                     </td>
                     <td className="py-4 text-right font-bold text-amber-400">{row.money?.toLocaleString() ?? 0}</td>
                     <td className="py-4 text-right text-teal-400 font-medium">{row.blessing ?? 0}</td>
@@ -479,6 +542,46 @@ export default function AdminDashboardClient({ initial }: Props) {
             </tbody>
           </table>
         </div>
+
+        {/* 分頁 */}
+        {lbPageCount > 1 && (
+          <div className="flex justify-between items-center mt-4 pt-3 border-t border-zinc-800/60 text-xs">
+            <p className="text-zinc-500">
+              第 {lbPage * lbPageSize + 1}–{Math.min((lbPage + 1) * lbPageSize, lbTotal)} 名 / 共 {lbTotal} 人
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setLbPage(0)}
+                disabled={lbPage === 0}
+                className="px-2 py-1 rounded border border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                «
+              </button>
+              <button
+                onClick={() => setLbPage((p) => Math.max(0, p - 1))}
+                disabled={lbPage === 0}
+                className="p-1 rounded border border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-3 text-zinc-300 font-mono">{lbPage + 1} / {lbPageCount}</span>
+              <button
+                onClick={() => setLbPage((p) => Math.min(lbPageCount - 1, p + 1))}
+                disabled={lbPage >= lbPageCount - 1}
+                className="p-1 rounded border border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setLbPage(lbPageCount - 1)}
+                disabled={lbPage >= lbPageCount - 1}
+                className="px-2 py-1 rounded border border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                »
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {toast && (
@@ -657,8 +760,31 @@ function KPICard({ title, value, alert = false, alertText }: { title: string; va
   );
 }
 
-function ColTh({ title, color }: { title: string; color: string }) {
-  const map: Record<string, string> = {
+/** 6 色系 badge palette — 命格 / 狀態欄位用，與玩家首頁卡片同色系 */
+function themeBadge(theme: string | null | undefined): string {
+  switch (theme) {
+    case 'amber': return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+    case 'teal': return 'bg-teal-500/15 text-teal-400 border-teal-500/30';
+    case 'purple': return 'bg-purple-500/15 text-purple-400 border-purple-500/30';
+    case 'rose': return 'bg-rose-500/15 text-rose-400 border-rose-500/30';
+    case 'sky': return 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+    case 'zinc':
+    default: return 'bg-zinc-700/30 text-zinc-300 border-zinc-600/40';
+  }
+}
+
+/** 風雲榜可點擊排序的欄位 header */
+function SortColTh<K extends string>({
+  title, color, sortKey, active, dir, onClick,
+}: {
+  title: string;
+  color: string;
+  sortKey: K;
+  active: boolean;
+  dir: 'desc' | 'asc';
+  onClick: (key: K) => void;
+}) {
+  const colorMap: Record<string, string> = {
     amber: 'hover:text-amber-500',
     teal: 'hover:text-teal-500',
     rose: 'hover:text-rose-500',
@@ -666,9 +792,22 @@ function ColTh({ title, color }: { title: string; color: string }) {
     zinc: 'hover:text-zinc-300',
     white: 'hover:text-white',
   };
+  const activeCls = active ? 'text-amber-400' : '';
   return (
-    <th className={`pb-3 text-right ${map[color] ?? ''} group transition-colors`}>
-      <div className="flex items-center justify-end gap-1">{title} <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-100" /></div>
+    <th
+      onClick={() => onClick(sortKey)}
+      className={`pb-3 text-right cursor-pointer select-none ${colorMap[color] ?? ''} ${activeCls} group transition-colors`}
+    >
+      <div className="flex items-center justify-end gap-1">
+        {title}
+        {active ? (
+          dir === 'desc'
+            ? <ArrowDown className="w-3 h-3 text-amber-400" />
+            : <ArrowUp className="w-3 h-3 text-amber-400" />
+        ) : (
+          <ArrowUpDown className="w-3 h-3 opacity-30 group-hover:opacity-100" />
+        )}
+      </div>
     </th>
   );
 }

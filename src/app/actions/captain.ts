@@ -14,6 +14,7 @@ import {
 } from '@/lib/auth';
 import { verifyQrToken } from '@/lib/qr';
 import { getSetting } from '@/lib/settings';
+import { recomputePlayerScore } from '@/lib/score';
 
 // ─────────────────────────────────────────────────────────────
 // 關主可看到的關卡（自己被指派的）
@@ -651,6 +652,8 @@ export async function rebirthPlayer(p: z.infer<typeof rebirthSchema>): Promise<A
       await client.query(`DELETE FROM "StockHolding" WHERE user_id = $1`, [targetId]);
       await client.query(`DELETE FROM "PlayerLoan" WHERE user_id = $1`, [targetId]);
       await client.query(`DELETE FROM "PlayerItem" WHERE user_id = $1`, [targetId]);
+      // 重生後四項值已重設 → 同步重算該玩家 final_score
+      await recomputePlayerScore(client, targetId);
 
       await client.query(
         `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)

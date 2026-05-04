@@ -13,6 +13,7 @@ import {
   DEFAULT_SETTINGS,
   setSetting,
 } from '@/lib/settings';
+import { recomputeAllPlayerScores } from '@/lib/score';
 
 // ─────────────────────────────────────────────────────────────
 // 系統參數設定（批次更新）
@@ -33,7 +34,14 @@ export async function updateAppSettings(
     for (const [k, v] of entries) {
       await setSetting(k, String(v ?? ''), session.userId);
     }
+    // 若任一 ScoreWeight 改變 → 立即重算所有玩家 final_score（不等下回合）
+    const weightKeys: AppSettingsKey[] = ['ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma'];
+    if (entries.some(([k]) => weightKeys.includes(k))) {
+      await recomputeAllPlayerScores();
+    }
     revalidatePath('/admin/settings');
+    revalidatePath('/admin');
+    revalidatePath('/display/board');
     return ok({ updated: entries.length });
   } catch (err) {
     return fail(err);
@@ -244,7 +252,9 @@ export async function performDangerOp(op: DangerOp): Promise<ActionResult<{ op: 
             `UPDATE "PlayerStats"
              SET destiny_name = NULL, money = 0, health = 0, blessing = 0, karma = 0,
                  rebirth_count = 0, bank_loan = 0, loan_updated_at = NULL,
-                 last_manual_refresh_at = NULL, updated_at = now()`,
+                 last_manual_refresh_at = NULL,
+                 final_score = 0,
+                 updated_at = now()`,
           );
           await client.query(`DELETE FROM "StockHolding"`);
           await client.query(`DELETE FROM "PlayerLoan"`);
@@ -1357,6 +1367,10 @@ export interface AdminDashboardData {
   leaderboard: Array<{
     user_id: string;
     name: string;
+    destiny_name: string | null;
+    destiny_theme: string | null;
+    karma_band_label: string | null;
+    karma_band_theme: string | null;
     money: number;
     blessing: number;
     health: number;
@@ -1407,29 +1421,37 @@ export async function getAdminDashboard(): Promise<ActionResult<AdminDashboardDa
        )`,
     );
     const sm = new Map(settings.rows.map((r) => [r.key, r.value] as const));
-    const wM = Number(sm.get('ScoreWeightMoney') ?? '0.05') || 0;
-    const wB = Number(sm.get('ScoreWeightBlessing') ?? '200') || 0;
-    const wK = Number(sm.get('ScoreWeightKarma') ?? '150') || 0;
+    // ScoreWeight* 已在 PlayerStats.final_score 預存（tickRound + 改 ScoreWeight 自動重算），這裡不再 JS 端算分
 
-    // 排行榜：純 SELECT 後在 JS 端計分（避免 PG 操作元類型推導問題）
+    // 排行榜：讀預存的 final_score；不下 LIMIT — 全部撈回讓前端分頁 + 排序
+    // LATERAL JOIN KarmaBand 取當前狀態 label / theme；LEFT JOIN InitialValueTemplate 取命格 theme
     const lbRaw = await query<{
       user_id: string; name: string;
+      destiny_name: string | null; destiny_theme: string | null;
+      karma_band_label: string | null; karma_band_theme: string | null;
       money: number; blessing: number; health: number; karma: number;
       rebirth_count: number;
+      final_score: number;
     }>(
-      `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.health, ps.karma, ps.rebirth_count
+      `SELECT a.user_id, a.name,
+              ps.destiny_name, tpl.theme AS destiny_theme,
+              kb.label AS karma_band_label, kb.theme AS karma_band_theme,
+              ps.money, ps.blessing, ps.health, ps.karma,
+              ps.rebirth_count, ps.final_score
        FROM "Account" a
        JOIN "PlayerStats" ps ON ps.user_id = a.user_id
+       LEFT JOIN LATERAL (
+         SELECT label, theme FROM "KarmaBand"
+         WHERE is_active = true
+           AND (karma_min IS NULL OR ps.karma >= karma_min)
+           AND (karma_max IS NULL OR ps.karma <= karma_max)
+         ORDER BY sort_order ASC LIMIT 1
+       ) kb ON true
+       LEFT JOIN "InitialValueTemplate" tpl ON tpl.label = ps.destiny_name
        WHERE a.role = 'player' AND a.is_active = true
-       LIMIT 200`,
+       ORDER BY ps.final_score DESC`,
     );
-    const leaderboard = lbRaw.rows
-      .map((r) => ({
-        ...r,
-        final_score: Math.round(r.money * wM + r.blessing * wB - r.karma * wK),
-      }))
-      .sort((a, b) => b.final_score - a.final_score)
-      .slice(0, 50);
+    const leaderboard = lbRaw.rows;
 
     // 最近 10 筆推進紀錄
     const ticksRaw = await query<{ created_at: string; payload: { round?: number; event_text?: string | null; game_started_at?: string | null } }>(
@@ -1545,10 +1567,13 @@ export async function triggerFinalScoring(): Promise<ActionResult<{ triggered_at
          VALUES ($1, $1, 'final_scoring', $2)`,
         [session.userId, JSON.stringify({})],
       );
+      // 鎖定終局快照：用當前 ScoreWeight 重算所有玩家 final_score
+      await recomputeAllPlayerScores(client);
       return upd.rows[0].final_scoring_triggered_at;
     });
     revalidatePath('/admin');
     revalidatePath('/admin/events');
+    revalidatePath('/display/board');
     return ok({ triggered_at: r });
   } catch (err) {
     return fail(err);
@@ -1592,7 +1617,9 @@ export async function restartGameCycle(): Promise<ActionResult<{ reset_at: strin
         `UPDATE "PlayerStats"
          SET destiny_name = NULL, money = 0, health = 0, blessing = 0, karma = 0,
              rebirth_count = 0, bank_loan = 0, loan_updated_at = NULL,
-             last_manual_refresh_at = NULL, updated_at = now()`,
+             last_manual_refresh_at = NULL,
+             final_score = 0,
+             updated_at = now()`,
       );
       // 2. 持股 / 借貸 / 道具
       await client.query(`DELETE FROM "StockHolding"`);
@@ -1665,7 +1692,9 @@ export async function resetSinglePlayer(userId: string): Promise<ActionResult<nu
         `UPDATE "PlayerStats"
          SET destiny_name = NULL, money = 0, health = 0, blessing = 0, karma = 0,
              rebirth_count = 0, bank_loan = 0, loan_updated_at = NULL,
-             last_manual_refresh_at = NULL, updated_at = now()
+             last_manual_refresh_at = NULL,
+             final_score = 0,
+             updated_at = now()
          WHERE user_id = $1`,
         [userId],
       );

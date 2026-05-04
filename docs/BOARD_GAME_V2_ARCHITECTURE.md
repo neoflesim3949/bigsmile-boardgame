@@ -134,6 +134,7 @@
 | `bank_loan` | INTEGER | 當前銀行借款金額（預設 0） |
 | `loan_updated_at` | TIMESTAMPTZ | 上次結算借款利息的時間（若無借款則為 NULL） |
 | `last_manual_refresh_at` | TIMESTAMPTZ NULL | 上次玩家「**手動點重新整理**」的時間；用於 60 秒節流（讀 `AppSettings.ManualRefreshCooldownSeconds`，預設 `'60'`） |
+| `final_score` | INTEGER NOT NULL DEFAULT 0 | **預存的計分**（migration 0012）。`= ROUND(money × wM + blessing × wB − karma × wK)`，每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 自動重算。Leaderboard 直接 `ORDER BY final_score DESC LIMIT N`，避免「JS 端算分 + LIMIT 截錯人」的踩雷。索引：`idx_PlayerStats_final_score_desc`。helper: `lib/score.ts` 的 `recomputeAllPlayerScores()` / `recomputePlayerScore(client, userId)` |
 | `updated_at` | TIMESTAMPTZ | 最後更新時間 |
 
 > **回合集中結算（不在讀取時計算）**：利息**不再**每次讀寫順便計算。改為主持人按下「下一回合」按鈕時，server action `tickRound()` 在同一個 pg tx 內：

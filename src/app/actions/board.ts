@@ -39,6 +39,10 @@ export interface BoardData {
   finalLeaderboard?: Array<{
     user_id: string;
     name: string;
+    destiny_name: string | null;
+    destiny_theme: string | null;
+    karma_band_label: string | null;
+    karma_band_theme: string | null;
     money: number;
     blessing: number;
     health: number;
@@ -121,63 +125,48 @@ export async function getBoardData(token: string): Promise<ActionResult<BoardDat
 
     // 常規即時排行榜（每次 tickRound 後 BoardConfig 變動 → 看板會 fallback poll 拿到新值）
     // 排序規則跟 admin dashboard 相同：money×Wm + blessing×Wb − karma×Wk（JS 端算）
-    const liveSettings = await query<{ key: string; value: string }>(
-      `SELECT key, value FROM "AppSettings"
-       WHERE key IN ('ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma')`,
-    );
-    const liveSm = new Map(liveSettings.rows.map((r) => [r.key, r.value] as const));
-    const liveWm = Number(liveSm.get('ScoreWeightMoney') ?? '0.05') || 0;
-    const liveWb = Number(liveSm.get('ScoreWeightBlessing') ?? '200') || 0;
-    const liveWk = Number(liveSm.get('ScoreWeightKarma') ?? '150') || 0;
-    const liveRaw = await query<{
-      user_id: string; name: string;
-      money: number; blessing: number; karma: number;
-    }>(
-      `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.karma
+    // 直接讀預存的 final_score（每 tickRound + 改 ScoreWeight 自動重算）；ORDER BY DESC LIMIT 10 一次到位
+    const liveRaw = await query<{ user_id: string; name: string }>(
+      `SELECT a.user_id, a.name
        FROM "Account" a
        JOIN "PlayerStats" ps ON ps.user_id = a.user_id
        WHERE a.role = 'player' AND a.is_active = true
-       LIMIT 500`,
+       ORDER BY ps.final_score DESC
+       LIMIT 10`,
     );
-    const liveLeaderboard = liveRaw.rows
-      .map((r) => ({
-        user_id: r.user_id,
-        name: r.name,
-        score: r.money * liveWm + r.blessing * liveWb - r.karma * liveWk,
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
-      .map(({ user_id, name }) => ({ user_id, name }));
+    const liveLeaderboard = liveRaw.rows.map(({ user_id, name }) => ({ user_id, name }));
 
     let finalLeaderboard: BoardData['finalLeaderboard'];
     if (cfg.final_scoring_triggered_at) {
-      const settings = await query<{ key: string; value: string }>(
-        `SELECT key, value FROM "AppSettings"
-         WHERE key IN ('ScoreWeightMoney', 'ScoreWeightBlessing', 'ScoreWeightKarma')`,
-      );
-      const sm = new Map(settings.rows.map((r) => [r.key, r.value] as const));
-      const wM = Number(sm.get('ScoreWeightMoney') ?? '0.05') || 0;
-      const wB = Number(sm.get('ScoreWeightBlessing') ?? '200') || 0;
-      const wK = Number(sm.get('ScoreWeightKarma') ?? '150') || 0;
-      // 計分搬到 JS 端（避免 PG 對 int * float-text-param 的 cast 推導失敗）
+      // 直接讀預存的 final_score（triggerFinalScoring 時已重算鎖定）
+      // LATERAL JOIN KarmaBand 取狀態；LEFT JOIN InitialValueTemplate 取命格 theme
       const lbRaw = await query<{
         user_id: string; name: string;
+        destiny_name: string | null; destiny_theme: string | null;
+        karma_band_label: string | null; karma_band_theme: string | null;
         money: number; blessing: number; health: number; karma: number;
         rebirth_count: number;
+        final_score: number;
       }>(
-        `SELECT a.user_id, a.name, ps.money, ps.blessing, ps.health, ps.karma, ps.rebirth_count
+        `SELECT a.user_id, a.name,
+                ps.destiny_name, tpl.theme AS destiny_theme,
+                kb.label AS karma_band_label, kb.theme AS karma_band_theme,
+                ps.money, ps.blessing, ps.health, ps.karma,
+                ps.rebirth_count, ps.final_score
          FROM "Account" a
          JOIN "PlayerStats" ps ON ps.user_id = a.user_id
+         LEFT JOIN LATERAL (
+           SELECT label, theme FROM "KarmaBand"
+           WHERE is_active = true
+             AND (karma_min IS NULL OR ps.karma >= karma_min)
+             AND (karma_max IS NULL OR ps.karma <= karma_max)
+           ORDER BY sort_order ASC LIMIT 1
+         ) kb ON true
+         LEFT JOIN "InitialValueTemplate" tpl ON tpl.label = ps.destiny_name
          WHERE a.role = 'player' AND a.is_active = true
-         LIMIT 500`,
+         ORDER BY ps.final_score DESC`,
       );
-      finalLeaderboard = lbRaw.rows
-        .map((r) => ({
-          ...r,
-          final_score: Math.round(r.money * wM + r.blessing * wB - r.karma * wK),
-        }))
-        .sort((a, b) => b.final_score - a.final_score)
-        .slice(0, 100);
+      finalLeaderboard = lbRaw.rows;
     }
 
     return ok({
