@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { QrCode, Settings2, Plus, MapPin, AlertCircle, Settings } from 'lucide-react';
+import { QrCode, Settings2, Plus, MapPin, AlertCircle, Settings, TrendingUp } from 'lucide-react';
 import { requireRole } from '@/lib/auth';
 import { listMyStations, listMyQuickActions } from '@/app/actions/captain';
 
@@ -56,7 +56,10 @@ export default async function CaptainPage() {
                   <p className="font-bold text-zinc-100">{s.name}</p>
                   {s.description && <p className="text-xs text-zinc-500 line-clamp-1">{s.description}</p>}
                 </div>
-                {s.allow_rebirth && <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded">重生鍵</span>}
+                <div className="flex gap-1 flex-wrap">
+                  {s.allow_rebirth && <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded">重生鍵</span>}
+                  {s.allow_stock_sell_multiplier && <span className="text-xs px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded">股票加乘</span>}
+                </div>
               </div>
               <div className="text-xs text-zinc-500 mt-1">
                 已使用 {s.global_use_count}{s.global_max_uses !== null ? ` / ${s.global_max_uses}` : ''}
@@ -65,6 +68,25 @@ export default async function CaptainPage() {
           ))}
         </div>
       </section>
+
+      {/* 股票加乘賣出（只在有開放此功能的關卡時顯示入口）*/}
+      {myStations.some((s) => s.allow_stock_sell_multiplier) && (
+        <Link
+          href="/captain/multipliers"
+          className="flex justify-between items-center bg-zinc-900 border border-emerald-900/40 hover:border-emerald-500/40 rounded-xl p-3 mb-4 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <p className="font-bold text-zinc-100 text-sm">股票加乘賣出 · 倍率管理</p>
+              <p className="text-xs text-zinc-500 mt-0.5">為已開放的關卡自設倍率方案</p>
+            </div>
+          </div>
+          <span className="text-emerald-400 text-xs">前往 →</span>
+        </Link>
+      )}
 
       {/* 我的快捷模組 */}
       <section className="mb-6">

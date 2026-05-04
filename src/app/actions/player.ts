@@ -987,6 +987,22 @@ function extractDelta(txType: string, payload: Record<string, unknown>, type: Hi
       const v = payload['proceeds'];
       return typeof v === 'number' ? v : null;
     }
+    if (type === 'blessing') {
+      // 基礎規則：每 1000 獲利扣 0.1 福分（賠錢不扣）
+      const v = payload['blessing_penalty'];
+      return typeof v === 'number' ? -v : 0;
+    }
+    return 0;
+  }
+  if (txType === 'captain_stock_sell_mult') {
+    if (type === 'money') {
+      const v = payload['total_money_gain'];
+      return typeof v === 'number' ? v : null;
+    }
+    if (type === 'blessing') {
+      const v = payload['blessing_penalty'];
+      return typeof v === 'number' ? -v : 0;
+    }
     return 0;
   }
   if (txType === 'forced_liquidation') {

@@ -24,6 +24,7 @@ const TX_TYPE_LABEL: Record<string, string> = {
   quick_action: '關主套用快捷',
   forced_liquidation: '強制平倉',
   karma_band_effect: '業力影響',
+  captain_stock_sell_mult: '關主代售（加乘）',
   item_grant: '取得道具',
   account_update: '帳號變更',
   settings_update: '系統設定變更',
@@ -85,6 +86,22 @@ function describe(txType: string, payload: Record<string, unknown>): string | nu
         : '';
       const proceedsStr = proceeds != null ? `共 $${proceeds.toLocaleString()}` : '';
       return `賣出 ${left} ×${shares} @${price.toLocaleString()} ${proceedsStr}${profitStr}`.trim();
+    }
+    case 'captain_stock_sell_mult': {
+      const code = s(payload.stock_code);
+      const name = s(payload.stock_name);
+      const shares = n(payload.shares);
+      const total = n(payload.total_money_gain);
+      const bonus = n(payload.bonus);
+      const multLabel = s(payload.multiplier_label);
+      const station = s(payload.station_name);
+      if (shares == null) return null;
+      const left = code && name ? `${code} ${name}` : code || name || '股票';
+      const tag = multLabel ? `「${multLabel}」` : '';
+      const where = station ? `${station} 關 ` : '';
+      const totalStr = total != null ? `共 +$${total.toLocaleString()}` : '';
+      const bonusStr = bonus != null && bonus > 0 ? `（含加成 +$${bonus.toLocaleString()}）` : '';
+      return `${where}關主代售 ${left} ×${shares} ${tag} ${totalStr}${bonusStr}`.trim();
     }
     case 'transfer': {
       const counterparty = s(payload.counterparty_name) ?? s(payload.to_user_name) ?? s(payload.from_user_name);

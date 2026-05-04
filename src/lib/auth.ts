@@ -137,17 +137,22 @@ export async function assertCaptainOfStation(
   client: PoolClient | null,
   captainUserId: string,
   stationId: string,
-): Promise<{ allow_rebirth: boolean }> {
-  const sql = `SELECT captain_user_ids, allow_rebirth FROM "Station" WHERE id = $1 AND is_active = true`;
+): Promise<{ allow_rebirth: boolean; allow_stock_sell_multiplier: boolean }> {
+  const sql = `SELECT captain_user_ids, allow_rebirth, allow_stock_sell_multiplier
+               FROM "Station" WHERE id = $1 AND is_active = true`;
+  type Row = { captain_user_ids: string[]; allow_rebirth: boolean; allow_stock_sell_multiplier: boolean };
   const r = client
-    ? await client.query<{ captain_user_ids: string[]; allow_rebirth: boolean }>(sql, [stationId])
-    : await query<{ captain_user_ids: string[]; allow_rebirth: boolean }>(sql, [stationId]);
+    ? await client.query<Row>(sql, [stationId])
+    : await query<Row>(sql, [stationId]);
   const row = r.rows[0];
   if (!row) throw new ActionError('NOT_FOUND', '關卡不存在或已停用');
   if (!row.captain_user_ids.includes(captainUserId)) {
     throw new ActionError('FORBIDDEN', '您未被指派為該關卡關主');
   }
-  return { allow_rebirth: row.allow_rebirth };
+  return {
+    allow_rebirth: row.allow_rebirth,
+    allow_stock_sell_multiplier: row.allow_stock_sell_multiplier,
+  };
 }
 
 export async function assertNotDuringFinalScoring(client?: PoolClient): Promise<void> {

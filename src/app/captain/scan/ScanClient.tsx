@@ -13,17 +13,22 @@ import {
   applyQuickAction,
   rebirthPlayer,
   captainVerifyPlayerQr,
+  listPlayerHoldingsForCaptain,
+  captainSellStockWithMultiplier,
   type CaptainStation,
   type QuickActionRow,
   type ScannedPlayer,
   type PlayerScannedItem,
+  type SellMultiplierRow,
+  type CaptainPlayerHolding,
 } from '@/app/actions/captain';
-import { Search } from 'lucide-react';
+import { Search, TrendingUp } from 'lucide-react';
 
 interface Props {
   captainUserId: string;
   stations: CaptainStation[];
   allQuickActions: QuickActionRow[];
+  allMultipliers: SellMultiplierRow[];
 }
 
 const IN_PROGRESS_VERSION = 1;
@@ -49,13 +54,16 @@ interface ScannedState {
   source: 'qr' | 'manual';
 }
 
-export default function ScanClient({ captainUserId, stations, allQuickActions }: Props) {
+export default function ScanClient({ captainUserId, stations, allQuickActions, allMultipliers }: Props) {
   const [stationId, setStationId] = useState(stations[0]?.id ?? '');
   const station = stations.find((s) => s.id === stationId);
   const stationQuickActions = allQuickActions.filter((qa) => qa.station_id === stationId);
+  const stationMultipliers = allMultipliers.filter((m) => m.station_id === stationId && m.is_active);
 
   const [scanOpen, setScanOpen] = useState(false);
   const [scanned, setScanned] = useState<ScannedState | null>(null);
+  const [holdings, setHoldings] = useState<CaptainPlayerHolding[]>([]);
+  const [sellTarget, setSellTarget] = useState<CaptainPlayerHolding | null>(null);
   const [inProgress, setInProgress] = useState<InProgressItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
@@ -93,6 +101,15 @@ export default function ScanClient({ captainUserId, stations, allQuickActions }:
     setTimeout(() => setToast(null), 2500);
   }
 
+  async function fetchHoldings(targetUserId: string): Promise<void> {
+    if (!station?.allow_stock_sell_multiplier) {
+      setHoldings([]);
+      return;
+    }
+    const r = await listPlayerHoldingsForCaptain(stationId, targetUserId);
+    setHoldings(r.ok ? r.data! : []);
+  }
+
   function handleScannedToken(token: string) {
     setScanOpen(false);
     setScanErr(null);
@@ -110,6 +127,7 @@ export default function ScanClient({ captainUserId, stations, allQuickActions }:
           allowRebirth: r.data!.allow_rebirth,
           source: 'qr',
         });
+        await fetchHoldings(r.data!.player.user_id);
       } else {
         setScanErr(r.error?.message ?? '無法解析');
       }
@@ -138,6 +156,7 @@ export default function ScanClient({ captainUserId, stations, allQuickActions }:
           source: 'manual',
         });
         setManualId('');
+        await fetchHoldings(r.data!.player.user_id);
       } else {
         setScanErr(r.error?.message ?? '查無此玩家');
       }
@@ -387,7 +406,7 @@ export default function ScanClient({ captainUserId, stations, allQuickActions }:
               <p className="text-xs text-zinc-500 font-mono">{scanned.player.user_id}</p>
               {scanned.player.destiny_name && <p className="text-xs text-zinc-500">命格：{scanned.player.destiny_name}</p>}
             </div>
-            <button onClick={() => setScanned(null)} className="text-zinc-500 hover:text-zinc-200">
+            <button onClick={() => { setScanned(null); setHoldings([]); }} className="text-zinc-500 hover:text-zinc-200">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -470,9 +489,74 @@ export default function ScanClient({ captainUserId, stations, allQuickActions }:
                   </button>
                 ))}
               </div>
+
+              {/* 股票加乘賣出（旗標站才顯示）*/}
+              {station?.allow_stock_sell_multiplier && (
+                <div className="mt-4 border-t border-zinc-800 pt-3">
+                  <p className="text-xs text-zinc-500 mb-2 flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3 text-emerald-400" />
+                    持股清單（點擊以加乘倍率代售）
+                  </p>
+                  {holdings.length === 0 ? (
+                    <p className="text-xs text-zinc-600 text-center py-3">玩家目前沒有任何持股</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {holdings.map((h) => {
+                        const profit = (h.current_price - h.avg_cost) * h.shares;
+                        return (
+                          <button
+                            key={h.stock_id}
+                            onClick={() => h.is_sellable && setSellTarget(h)}
+                            disabled={!h.is_sellable || stationMultipliers.length === 0}
+                            className="w-full bg-zinc-950 hover:bg-zinc-800 disabled:hover:bg-zinc-950 border border-zinc-700 rounded-lg p-2.5 text-left disabled:opacity-50 transition-colors"
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-zinc-100 text-sm">{h.code} {h.name}</p>
+                                <p className="text-[0.6875rem] text-zinc-500 mt-0.5">
+                                  ×{h.shares} 股 · 均價 ${h.avg_cost.toLocaleString()} · 現價 ${h.current_price.toLocaleString()}
+                                </p>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className={`text-xs font-mono font-bold ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {profit >= 0 ? '+' : ''}${profit.toLocaleString()}
+                                </p>
+                                <p className="text-[0.625rem] text-zinc-600">預期利潤</p>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {stationMultipliers.length === 0 && (
+                    <p className="text-[0.6875rem] text-amber-500 mt-2 text-center">
+                      ⚠️ 此關卡尚未設定任何倍率方案，請至「倍率管理」新增
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           )}
         </section>
+      )}
+
+      {/* 股票加乘賣出 modal */}
+      {sellTarget && scanned && (
+        <SellWithMultiplierModal
+          stationId={stationId}
+          targetUserId={scanned.player.user_id}
+          targetName={scanned.player.name}
+          holding={sellTarget}
+          multipliers={stationMultipliers}
+          onClose={() => setSellTarget(null)}
+          onSold={async (msg) => {
+            showToast(true, msg);
+            setSellTarget(null);
+            // 重抓 holdings 反映賣出後的狀態
+            await fetchHoldings(scanned.player.user_id);
+          }}
+        />
       )}
 
       {scanOpen && (
@@ -639,6 +723,155 @@ export default function ScanClient({ captainUserId, stations, allQuickActions }:
 
 function fmt(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
+}
+
+function SellWithMultiplierModal({
+  stationId, targetUserId, targetName, holding, multipliers, onClose, onSold,
+}: {
+  stationId: string;
+  targetUserId: string;
+  targetName: string;
+  holding: CaptainPlayerHolding;
+  multipliers: SellMultiplierRow[];
+  onClose: () => void;
+  onSold: (msg: string) => void | Promise<void>;
+}) {
+  const [shares, setShares] = useState(holding.shares.toString());
+  const [multId, setMultId] = useState<string>(multipliers[0]?.id ?? '');
+  const [busy, busyTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const sharesNum = Math.max(0, Math.min(holding.shares, Math.floor(Number(shares) || 0)));
+  const proceeds = holding.current_price * sharesNum;
+  const profit = (holding.current_price - holding.avg_cost) * sharesNum;
+  const mult = multipliers.find((m) => m.id === multId);
+  const moneyMult = mult?.money_multiplier ?? 1;
+  const blessingMult = mult?.blessing_penalty_multiplier ?? 1;
+  const bonus = profit > 0 ? Math.round(profit * (moneyMult - 1)) : 0;
+  const totalMoney = proceeds + bonus;
+  const blessingPenalty = profit > 0 ? Math.round((profit * blessingMult) / 10000) : 0;
+
+  function handleConfirm() {
+    if (!mult) {
+      setErr('請選擇倍率方案');
+      return;
+    }
+    if (sharesNum <= 0) {
+      setErr('股數必須大於 0');
+      return;
+    }
+    setErr(null);
+    busyTransition(async () => {
+      const r = await captainSellStockWithMultiplier({
+        stationId,
+        targetUserId,
+        stockId: holding.stock_id,
+        shares: sharesNum,
+        multiplierId: mult.id,
+      });
+      if (r.ok) {
+        await onSold(`已代售 ${holding.code} ×${sharesNum}：+$${r.data!.total_money_gain.toLocaleString()}${blessingPenalty > 0 ? ` / 福分 -${blessingPenalty}` : ''}`);
+      } else {
+        setErr(r.error?.message ?? '賣出失敗');
+        setConfirming(false);
+      }
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-zinc-900 border border-emerald-500/40 rounded-2xl p-5 max-w-sm w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-3">
+          <TrendingUp className="w-5 h-5 text-emerald-400" />
+          <h4 className="font-bold text-zinc-100">股票加乘賣出</h4>
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">
+          代售 <span className="text-amber-400 font-bold">{targetName}</span> 的持股
+        </p>
+
+        <div className="bg-zinc-950 border border-zinc-700 rounded-lg p-3 mb-3 text-sm">
+          <p className="font-bold text-zinc-100">{holding.code} {holding.name}</p>
+          <p className="text-[0.6875rem] text-zinc-500 mt-0.5">
+            持有 {holding.shares} 股 · 均價 ${holding.avg_cost.toLocaleString()} · 現價 ${holding.current_price.toLocaleString()}
+          </p>
+        </div>
+
+        <label className="text-xs text-zinc-500">賣出股數</label>
+        <input
+          type="number"
+          min="1"
+          max={holding.shares}
+          value={shares}
+          onChange={(e) => setShares(e.target.value)}
+          className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-2 text-zinc-200 text-sm font-mono mb-3"
+        />
+
+        <p className="text-xs text-zinc-500 mb-1.5">選擇倍率方案</p>
+        <div className="space-y-1.5 mb-3">
+          {multipliers.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setMultId(m.id)}
+              className={`w-full text-left rounded-lg p-2 border transition-colors ${
+                multId === m.id
+                  ? 'bg-emerald-500/15 border-emerald-500/50'
+                  : 'bg-zinc-950 border-zinc-700 hover:bg-zinc-800'
+              }`}
+            >
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-zinc-100 text-sm">{m.label}</span>
+                <span className="text-xs font-mono">
+                  <span className="text-emerald-400">×{m.money_multiplier}</span>
+                  <span className="text-zinc-600 mx-1">/</span>
+                  <span className="text-rose-400">×{m.blessing_penalty_multiplier}</span>
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="bg-zinc-950 border border-emerald-700/40 rounded-lg p-3 mb-3 text-xs space-y-1">
+          <p className="text-zinc-500 mb-1 font-bold">📊 結算預覽</p>
+          <div className="flex justify-between"><span className="text-zinc-500">賣出市值</span><span className="text-zinc-200 font-mono">${proceeds.toLocaleString()}</span></div>
+          <div className="flex justify-between"><span className="text-zinc-500">原始利潤</span><span className={`font-mono ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{profit >= 0 ? '+' : ''}${profit.toLocaleString()}</span></div>
+          {profit > 0 && (
+            <div className="flex justify-between"><span className="text-zinc-500">倍率加成</span><span className="text-emerald-400 font-mono">+${bonus.toLocaleString()}</span></div>
+          )}
+          <div className="flex justify-between border-t border-zinc-800 pt-1 mt-1"><span className="text-zinc-300 font-bold">入帳金錢</span><span className="text-amber-400 font-mono font-bold">+${totalMoney.toLocaleString()}</span></div>
+          <div className="flex justify-between"><span className="text-zinc-500">福分扣除</span><span className="text-rose-400 font-mono">{blessingPenalty > 0 ? `-${blessingPenalty}` : '不扣（賠錢或微利）'}</span></div>
+          {profit <= 0 && (
+            <p className="text-[0.625rem] text-zinc-600 italic">賠錢時不套用倍率、不扣福分</p>
+          )}
+        </div>
+
+        {err && <p className="text-rose-400 text-sm mb-3">{err}</p>}
+
+        {!confirming ? (
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2.5 rounded-lg text-sm font-bold border border-zinc-700 min-h-[44px]">取消</button>
+            <button
+              onClick={() => setConfirming(true)}
+              disabled={!multId || sharesNum <= 0}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white py-2.5 rounded-lg text-sm font-bold min-h-[44px]"
+            >
+              下一步
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="text-amber-400 text-xs mb-3 text-center">⚠️ 確認後立即生效，無法復原</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirming(false)} disabled={busy} className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 py-2.5 rounded-lg text-sm font-bold border border-zinc-700 min-h-[44px]">返回</button>
+              <button onClick={handleConfirm} disabled={busy} className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white py-2.5 rounded-lg text-sm font-bold min-h-[44px]">
+                {busy ? '處理中…' : '確認賣出'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {

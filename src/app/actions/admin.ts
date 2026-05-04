@@ -491,6 +491,7 @@ const stationSchema = z.object({
   description: z.string().max(400),
   captain_user_ids: z.array(z.string()),
   allow_rebirth: z.boolean(),
+  allow_stock_sell_multiplier: z.boolean(),
   player_max_uses: z.number().int().positive().nullable(),
   global_max_uses: z.number().int().positive().nullable(),
   is_active: z.boolean(),
@@ -504,6 +505,7 @@ export interface StationRow {
   description: string;
   captain_user_ids: string[];
   allow_rebirth: boolean;
+  allow_stock_sell_multiplier: boolean;
   player_max_uses: number | null;
   global_max_uses: number | null;
   global_use_count: number;
@@ -515,7 +517,7 @@ export async function listStations(): Promise<ActionResult<StationRow[]>> {
   try {
     await requireRole('admin');
     const r = await query<StationRow>(
-      `SELECT id, name, description, captain_user_ids, allow_rebirth,
+      `SELECT id, name, description, captain_user_ids, allow_rebirth, allow_stock_sell_multiplier,
               player_max_uses, global_max_uses, global_use_count, is_active, created_at
        FROM "Station" ORDER BY created_at ASC`,
     );
@@ -533,12 +535,14 @@ export async function upsertStation(payload: StationPayload): Promise<ActionResu
       const r = await query<StationRow>(
         `UPDATE "Station"
          SET name=$1, description=$2, captain_user_ids=$3, allow_rebirth=$4,
-             player_max_uses=$5, global_max_uses=$6, is_active=$7
-         WHERE id=$8
-         RETURNING id, name, description, captain_user_ids, allow_rebirth,
+             allow_stock_sell_multiplier=$5,
+             player_max_uses=$6, global_max_uses=$7, is_active=$8
+         WHERE id=$9
+         RETURNING id, name, description, captain_user_ids, allow_rebirth, allow_stock_sell_multiplier,
                    player_max_uses, global_max_uses, global_use_count, is_active, created_at`,
         [
           data.name, data.description, data.captain_user_ids, data.allow_rebirth,
+          data.allow_stock_sell_multiplier,
           data.player_max_uses, data.global_max_uses, data.is_active, data.id,
         ],
       );
@@ -547,13 +551,14 @@ export async function upsertStation(payload: StationPayload): Promise<ActionResu
       return ok(r.rows[0]);
     }
     const r = await query<StationRow>(
-      `INSERT INTO "Station" (name, description, captain_user_ids, allow_rebirth,
+      `INSERT INTO "Station" (name, description, captain_user_ids, allow_rebirth, allow_stock_sell_multiplier,
                               player_max_uses, global_max_uses, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, name, description, captain_user_ids, allow_rebirth,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, name, description, captain_user_ids, allow_rebirth, allow_stock_sell_multiplier,
                  player_max_uses, global_max_uses, global_use_count, is_active, created_at`,
       [
         data.name, data.description, data.captain_user_ids, data.allow_rebirth,
+        data.allow_stock_sell_multiplier,
         data.player_max_uses, data.global_max_uses, data.is_active,
       ],
     );

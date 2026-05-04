@@ -68,6 +68,11 @@ export default function StationsClient({ initialStations, captains }: Props) {
                         <Sparkles className="w-3 h-3" /> 重生鍵
                       </span>
                     )}
+                    {s.allow_stock_sell_multiplier && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        股票加乘賣出
+                      </span>
+                    )}
                     {!s.is_active && <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">停用</span>}
                   </div>
                   {s.description && <p className="text-sm text-zinc-500 mt-1 line-clamp-2">{s.description}</p>}
@@ -149,6 +154,7 @@ function StationModal({
   const [description, setDesc] = useState(target?.description ?? '');
   const [captainIds, setCaptainIds] = useState<string[]>(target?.captain_user_ids ?? []);
   const [allowRebirth, setAllowRebirth] = useState(target?.allow_rebirth ?? false);
+  const [allowStockMult, setAllowStockMult] = useState(target?.allow_stock_sell_multiplier ?? false);
   const [playerMax, setPlayerMax] = useState<string>(target?.player_max_uses?.toString() ?? '');
   const [globalMax, setGlobalMax] = useState<string>(target?.global_max_uses?.toString() ?? '');
   const [isActive, setIsActive] = useState(target?.is_active ?? true);
@@ -168,6 +174,7 @@ function StationModal({
         description,
         captain_user_ids: captainIds,
         allow_rebirth: allowRebirth,
+        allow_stock_sell_multiplier: allowStockMult,
         player_max_uses: playerMax ? Number(playerMax) : null,
         global_max_uses: globalMax ? Number(globalMax) : null,
         is_active: isActive,
@@ -229,6 +236,11 @@ function StationModal({
               <input type="checkbox" checked={allowRebirth} onChange={(e) => setAllowRebirth(e.target.checked)} />
               <Sparkles className="w-4 h-4 text-purple-400" />
               關主可使用「重生鍵」（地獄狀態玩家掃 QR 才會出現）
+            </label>
+            <label className="flex items-center gap-2 text-zinc-300 text-sm">
+              <input type="checkbox" checked={allowStockMult} onChange={(e) => setAllowStockMult(e.target.checked)} />
+              <span className="text-emerald-400">📈</span>
+              關主可使用「股票加乘賣出」（自設倍率代售玩家持股）
             </label>
             <label className="flex items-center gap-2 text-zinc-300 text-sm">
               <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />

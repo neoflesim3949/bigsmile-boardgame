@@ -191,6 +191,30 @@
 > - 候選為空（極端浮點偏差）→ fallback：從所有 active templates 均勻抽（**永遠不擋人**）
 > **為什麼 `theme` 是枚舉**：Tailwind JIT 必須在編譯期看到完整的 class 字串才會生成樣式，所以後台不能存任意 hex 色碼讓前端動態套用。改採「色系名稱」由後台選擇、前端維護一份固定的 `theme → Tailwind class` palette（見 `src/app/onboarding/OnboardingClient.tsx` 的 `THEME_PALETTE`）。新增色系流程：先在 palette 加一筆，再在 schema CHECK 加值。
 
+#### `StationSellMultiplier` — 股票加乘賣出倍率方案
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `id` | UUID PK | |
+| `station_id` | UUID FK→Station ON DELETE CASCADE | |
+| `label` | TEXT | 方案名稱（例：「拜財神爺 buff」「投資技巧 + 拜財神」） |
+| `money_multiplier` | NUMERIC(5,2) `>= 0` | 金錢倍率（×N，profit 額外加成 = profit × (N - 1)） |
+| `blessing_penalty_multiplier` | NUMERIC(5,2) `>= 0` | 福分扣分倍率（基礎為「1K 獲利扣 0.1 福分」） |
+| `sort_order` | INTEGER DEFAULT 0 | UI 排序 |
+| `is_active` | BOOLEAN DEFAULT true | 是否啟用 |
+| `created_at` / `updated_at` | TIMESTAMPTZ | |
+
+索引：`(station_id, is_active, sort_order)`。
+
+> **觸發時機**：關主在 `/captain/scan` 對玩家持股執行 `captainSellStockWithMultiplier` 時動態取用。每個關卡可有多個倍率方案；關主在 `/captain/multipliers` 自管。`Station.allow_stock_sell_multiplier` 為旗標開關（admin 在 `/admin/stations` 控制），未開啟的站不顯示倍率管理頁也不顯示掃描結果中的持股清單。
+
+> **計算規則**（同 V2 §7.1.1）：
+> - `profit > 0`：`bonus = ROUND(profit × (money_multiplier - 1))`、`blessing_penalty = ROUND(profit × blessing_penalty_multiplier / 10000)`
+> - `profit ≤ 0`：bonus=0、blessing_penalty=0（賠錢時不扣福分、不疊加倍率）
+> - **同樣的基礎扣分規則套用在玩家自助 `sellStock`**（V2 §7.1.1 表）
+
+#### `Station.allow_stock_sell_multiplier`（migration 0008 ALTER）
+旗標欄位，預設 false。開啟後關主端會出現股票加乘賣出 UI；關閉後即使有 `StationSellMultiplier` row 也不可用（後端 guard 強制驗）。
+
 #### `KarmaBand` — 業力影響區段（每回合自動套用）
 | 欄位 | 型別 | 說明 |
 |------|------|------|
@@ -216,8 +240,7 @@
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | `id` | UUID PK | |
-| `station_id` | UUID FK→Station | 所屬關卡 |
-| `owner_user_id` | TEXT FK→Account | 建立的關主 UserID |
+| `station_id` | UUID FK→Station ON DELETE CASCADE | 所屬關卡（**僅綁關卡**，同站的多位關主共用同一份清單） |
 | `label` | TEXT | 顯示名稱（例：「完成挑戰 +50 金錢」） |
 | `delta_money` | INTEGER | 金錢變動（正/負） |
 | `delta_health` | INTEGER | 健康變動 |
@@ -237,6 +260,7 @@
 > 一個快捷模組可同時調整多項參數，並可選擇性綁定道具發放。
 > `req_*` 欄位為可選前提條件：Null = 不檢查；有值時玩家必須 ≥ 該值（或持有該道具）方可執行。條件不符時後端回傳未達標清單，前端彈窗顯示。
 > 限額（`player_max_uses` / `global_max_uses`）任一超出 → 後端拒絕，回 `USAGE_LIMIT_EXCEEDED` 並附訊息（哪個 cap 觸發）。
+> **歸屬模型（CRITICAL）**：QuickAction 只綁 `station_id`，**沒有 `owner_user_id`**。同一個關卡可被多位關主共管，他們看到 / 編輯 / 刪除的是同一份清單；任何被指派為該站關主的人都有完整 CRUD 權限（後端驗 `$session.userId = ANY(s.captain_user_ids)`）。`StationSellMultiplier` 也是同一模型。Migration 0009 移除了原本的 `owner_user_id` 欄位（早期設計每位關主有私房清單，後來改為協作模型）。
 
 #### `StationUsage` — 每位玩家在每個關卡的使用次數
 | 欄位 | 型別 | 說明 |
@@ -381,7 +405,7 @@
 | `id` | BIGSERIAL PK | |
 | `user_id` | TEXT FK→Account | 受影響玩家 |
 | `actor_user_id` | TEXT NULL FK→Account | 執行者（關主／管理員／NULL=玩家自己） |
-| `tx_type` | TEXT | `quick_action` / `item_grant` / `exchange` / `transfer` / `stock_buy` / `stock_sell` / `forced_liquidation` / `karma_band_effect` / `settings_update` / `account_update` / `rebirth` / `bank_borrow` / `bank_repay` / `bank_interest` / `final_scoring` / `round_tick` / `danger_zone_reset` |
+| `tx_type` | TEXT | `quick_action` / `item_grant` / `exchange` / `transfer` / `stock_buy` / `stock_sell` / `captain_stock_sell_mult` / `forced_liquidation` / `karma_band_effect` / `settings_update` / `account_update` / `rebirth` / `bank_borrow` / `bank_repay` / `bank_interest` / `final_scoring` / `round_tick` / `danger_zone_reset` |
 | `payload` | JSONB | 各 type 的細節（金額、商品 ID、轉出/轉入對象…） |
 | `created_at` | TIMESTAMPTZ | |
 
@@ -649,6 +673,10 @@ supabase/migrations/               # SQL migration（遞增 prefix）
 | `applyQuickAction(captainUserId, targetUserId, quickActionId)` | 套用快捷模組：(1) 驗條件 (2) **驗使用次數限額**（QuickAction / Station 各自的 player_max_uses / global_max_uses，任一超出回 `USAGE_LIMIT_EXCEEDED`）(3) 套用四項參數變動（health 寫入時 cap 100）(4) UPSERT `StationUsage` / `QuickActionUsage` `count += 1`、UPDATE `Station.global_use_count` / `QuickAction.global_use_count` += 1 | pg tx |
 | `grantItem(captainUserId, targetUserId, itemId)` | 單獨發放道具 | pg tx |
 | `rebirthPlayer(captainUserId, targetUserId, stationId)` | 重生玩家：四項參數重設為重生初始值（健康最高 100）、清空 `bank_loan` 與 `loan_updated_at`、**清空 `StockHolding`（所有持股歸零）**、**清空 `PlayerItem`（所有道具刪除，含手術執照、財神爺 BUFF 等身份識別道具）**、解除死亡 | pg tx |
+| `listMyStationSellMultipliers()` | 列出 captain 被指派且 `allow_stock_sell_multiplier=true` 的關卡所有倍率方案（用於 `/captain/multipliers` CRUD 頁與 `/captain/scan` 掃碼後 picker） | 無 |
+| `upsertStationSellMultiplier(payload)` / `deleteStationSellMultiplier(id)` | 倍率方案 CRUD（驗 captain 屬於該 station + station 旗標開啟） | 無 |
+| `listPlayerHoldingsForCaptain(stationId, targetUserId)` | 取得玩家所有持股（含 code / name / 均價 / 現價 / shares / is_sellable）— captain 掃完玩家 QR 後立即取用 | 無 |
+| `captainSellStockWithMultiplier({ stationId, targetUserId, stockId, shares, multiplierId })` | 關主代售加乘賣出：atomic tx 內驗權限 / 多重 guard（站旗標、倍率屬於該站、玩家未死亡、TourMode/終局結算未觸發、is_sellable、持股足夠）→ 計算 bonus + blessing_penalty（規則同 V2 §7.1.1）→ 加錢 / 扣福分 / 更新或刪 StockHolding / 寫 `captain_stock_sell_mult` Transaction（actor=關主） | pg tx |
 | `borrowBank(userId, amount)` | 銀行貸款：檢查 `amount ≤ blessing * BankLoanCapacityRatio - bank_loan`，增加金錢與借款，寫入 `loan_updated_at` | pg tx |
 | `repayBank(userId, amount)` | 銀行還款：扣除金錢，減去 `bank_loan`，若還清則清空 `loan_updated_at` | pg tx |
 

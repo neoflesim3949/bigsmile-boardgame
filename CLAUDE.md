@@ -207,6 +207,14 @@ assertPlayerAlive(stats)   // ← 統一 guard
   - **單條 CTE SQL** 完成 SELECT + DELETE + UPDATE + INSERT 寫紀錄（無 N+1）
   - admin 在 `/admin/stocks` 回合腳本總表「事件跑馬燈」欄前面的「強制平倉 %」input 設定（rose 色強調危險）
   - 玩家歷史明細顯示：「因『事件名』股票『BTC 比特幣』被強制售出 ×N @ $0」，金錢 delta = 0
+- **快捷模組 / 倍率方案歸屬（CRITICAL）**：`QuickAction` 與 `StationSellMultiplier` 都**只綁 `station_id`，沒有 `owner_user_id`**。同一個關卡的多位關主共用同一份清單，任何被指派的關主都能完整 CRUD。後端 guard 用 `$session.userId = ANY(s.captain_user_ids)` 驗權限，**禁止**用 `WHERE owner_user_id = $captainUserId` 的舊模式。Migration 0009 移除了 QuickAction 原本的 `owner_user_id` 欄位（早期設計每位關主有私房清單，後改為協作模型）。
+- **股票加乘賣出（關主限定）**：`Station.allow_stock_sell_multiplier` 旗標（admin 在 `/admin/stations` 開關）。開啟後關主可在 `/captain/multipliers` 自管倍率方案（`StationSellMultiplier` 表，`{label, money_multiplier, blessing_penalty_multiplier, sort_order, is_active}`），掃玩家 QR 或手動輸入 ID 後在 `/captain/scan` 看到玩家持股清單，選一檔點擊 → modal 跳出股數 + 倍率選擇 → 確認賣出。**計算規則**：
+  - `proceeds = current_price × shares`、`profit = (current_price - avg_cost) × shares`
+  - `profit > 0` → `bonus = round(profit × (moneyMult - 1))`、`blessing_penalty = round(profit × blessingMult / 10000)`（**1K 獲利扣 0.1 福分**為基礎）
+  - `profit ≤ 0` → bonus=0、blessing_penalty=0（**賠錢不疊加倍率、不扣福分**）
+  - 寫 `Transaction tx_type='captain_stock_sell_mult'`，actor 是關主 user_id
+  - **同樣的「1K 獲利扣 0.1 福分」基礎規則也套用在玩家 `/stock` 自助 sellStock**（不是只有關主代售才扣）；profit ≤ 0 同樣不扣
+  - **掃碼或手動輸入 ID 都可用**（不像重生鍵限定 QR）；後端在 captainSellStockWithMultiplier 內驗 captain 屬於該 station 且 station 旗標開啟、multiplier 屬於該 station 且啟用
 - **業力影響（KarmaBand）**：`/admin/settings` 命格範本下方的「業力影響」區管理。每筆 row = `{label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta, sort_order, is_active}`，`karma_min/max` 允許 NULL（不設下/上限）。`tickRound` Tx1 在強制平倉之後執行：
   - 對 `health > 0 AND blessing > 0` 的玩家以 LATERAL JOIN 取對應 band（重疊以 `sort_order` 小者優先 LIMIT 1）
   - 跳過 4 項 delta 全 0 的 band（如「平凡」），避免污染 Transaction

@@ -234,10 +234,17 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
 
       const proceeds = price * data.shares;
       const profit = (price - me.avg_cost) * data.shares;
+      // 基礎福分扣分規則：每 1000 獲利扣 0.1 福分（ROUND；賠錢不扣）
+      const blessingPenalty = profit > 0 ? Math.round(profit / 10000) : 0;
 
-      const newMoneyR = await client.query<{ money: number }>(
-        `UPDATE "PlayerStats" SET money = money + $2, updated_at = now() WHERE user_id = $1 RETURNING money`,
-        [session.userId, proceeds],
+      const newMoneyR = await client.query<{ money: number; blessing: number }>(
+        `UPDATE "PlayerStats"
+         SET money = money + $2,
+             blessing = GREATEST(0, blessing - $3),
+             updated_at = now()
+         WHERE user_id = $1
+         RETURNING money, blessing`,
+        [session.userId, proceeds, blessingPenalty],
       );
 
       const remaining = me.shares - data.shares;
@@ -259,7 +266,7 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
          VALUES ($1, $1, 'stock_sell', $2)`,
         [session.userId, JSON.stringify({
           stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
-          shares: data.shares, price, proceeds, profit,
+          shares: data.shares, price, proceeds, profit, blessing_penalty: blessingPenalty,
         })],
       );
 

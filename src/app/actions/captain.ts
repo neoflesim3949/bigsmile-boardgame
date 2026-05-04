@@ -23,6 +23,7 @@ export interface CaptainStation {
   name: string;
   description: string;
   allow_rebirth: boolean;
+  allow_stock_sell_multiplier: boolean;
   player_max_uses: number | null;
   global_max_uses: number | null;
   global_use_count: number;
@@ -32,7 +33,7 @@ export async function listMyStations(): Promise<ActionResult<CaptainStation[]>> 
   try {
     const session = await requireRole('captain');
     const r = await query<CaptainStation>(
-      `SELECT id, name, description, allow_rebirth,
+      `SELECT id, name, description, allow_rebirth, allow_stock_sell_multiplier,
               player_max_uses, global_max_uses, global_use_count
        FROM "Station"
        WHERE is_active = true AND $1 = ANY(captain_user_ids)
@@ -46,13 +47,12 @@ export async function listMyStations(): Promise<ActionResult<CaptainStation[]>> 
 }
 
 // ─────────────────────────────────────────────────────────────
-// 快捷模組 CRUD（關主自己建的）
+// 快捷模組 CRUD（綁關卡，同站多關主共用）
 // ─────────────────────────────────────────────────────────────
 export interface QuickActionRow {
   id: string;
   station_id: string;
   station_name?: string;
-  owner_user_id: string;
   label: string;
   delta_money: number;
   delta_health: number;
@@ -73,9 +73,10 @@ export interface QuickActionRow {
 export async function listMyQuickActions(): Promise<ActionResult<QuickActionRow[]>> {
   try {
     const session = await requireRole('captain');
+    // 列出 captain 被指派的所有關卡的快捷模組（站綁定，多關主共用）
     const r = await query<QuickActionRow>(
       `SELECT qa.id, qa.station_id, s.name AS station_name,
-              qa.owner_user_id, qa.label,
+              qa.label,
               qa.delta_money, qa.delta_health, qa.delta_blessing, qa.delta_karma,
               qa.bound_item_id, i.name AS bound_item_name,
               qa.req_money, qa.req_health, qa.req_blessing, qa.req_karma, qa.req_item_id,
@@ -83,8 +84,8 @@ export async function listMyQuickActions(): Promise<ActionResult<QuickActionRow[
        FROM "QuickAction" qa
        JOIN "Station" s ON s.id = qa.station_id
        LEFT JOIN "Item" i ON i.id = qa.bound_item_id
-       WHERE qa.owner_user_id = $1
-       ORDER BY qa.created_at ASC`,
+       WHERE $1 = ANY(s.captain_user_ids) AND s.is_active = true
+       ORDER BY s.created_at ASC, qa.created_at ASC`,
       [session.userId],
     );
     return ok(r.rows);
@@ -120,6 +121,16 @@ export async function upsertQuickAction(p: QuickActionPayload): Promise<ActionRe
     await assertCaptainOfStation(null, session.userId, data.station_id);
 
     if (data.id) {
+      // 確認此 QuickAction 屬於 captain 管轄的某個 station（即使 station_id 變更也驗新舊兩端）
+      const own = await query<{ station_id: string }>(
+        `SELECT qa.station_id FROM "QuickAction" qa
+         JOIN "Station" s ON s.id = qa.station_id
+         WHERE qa.id = $1 AND $2 = ANY(s.captain_user_ids)`,
+        [data.id, session.userId],
+      );
+      if (own.rows.length === 0) {
+        throw new ActionError('NOT_FOUND', '快捷模組不存在或非你關卡');
+      }
       const r = await query<QuickActionRow>(
         `UPDATE "QuickAction"
          SET station_id=$1, label=$2,
@@ -127,8 +138,8 @@ export async function upsertQuickAction(p: QuickActionPayload): Promise<ActionRe
              bound_item_id=$7,
              req_money=$8, req_health=$9, req_blessing=$10, req_karma=$11, req_item_id=$12,
              player_max_uses=$13, global_max_uses=$14
-         WHERE id=$15 AND owner_user_id=$16
-         RETURNING id, station_id, owner_user_id, label,
+         WHERE id=$15
+         RETURNING id, station_id, label,
                    delta_money, delta_health, delta_blessing, delta_karma,
                    bound_item_id, req_money, req_health, req_blessing, req_karma, req_item_id,
                    player_max_uses, global_max_uses, global_use_count`,
@@ -138,27 +149,27 @@ export async function upsertQuickAction(p: QuickActionPayload): Promise<ActionRe
           data.bound_item_id,
           data.req_money, data.req_health, data.req_blessing, data.req_karma, data.req_item_id,
           data.player_max_uses, data.global_max_uses,
-          data.id, session.userId,
+          data.id,
         ],
       );
-      if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '快捷模組不存在或非你建立');
+      if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '快捷模組不存在');
       revalidatePath('/captain/actions');
       return ok(r.rows[0]);
     }
     const r = await query<QuickActionRow>(
       `INSERT INTO "QuickAction"
-         (station_id, owner_user_id, label,
+         (station_id, label,
           delta_money, delta_health, delta_blessing, delta_karma,
           bound_item_id,
           req_money, req_health, req_blessing, req_karma, req_item_id,
           player_max_uses, global_max_uses)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-       RETURNING id, station_id, owner_user_id, label,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, station_id, label,
                  delta_money, delta_health, delta_blessing, delta_karma,
                  bound_item_id, req_money, req_health, req_blessing, req_karma, req_item_id,
                  player_max_uses, global_max_uses, global_use_count`,
       [
-        data.station_id, session.userId, data.label,
+        data.station_id, data.label,
         data.delta_money, data.delta_health, data.delta_blessing, data.delta_karma,
         data.bound_item_id,
         data.req_money, data.req_health, data.req_blessing, data.req_karma, data.req_item_id,
@@ -175,11 +186,17 @@ export async function upsertQuickAction(p: QuickActionPayload): Promise<ActionRe
 export async function deleteQuickAction(id: string): Promise<ActionResult<null>> {
   try {
     const session = await requireRole('captain');
-    const r = await query(
-      `DELETE FROM "QuickAction" WHERE id = $1 AND owner_user_id = $2`,
+    // 驗 QuickAction 屬於 captain 管轄的 station
+    const own = await query<{ station_id: string }>(
+      `SELECT qa.station_id FROM "QuickAction" qa
+       JOIN "Station" s ON s.id = qa.station_id
+       WHERE qa.id = $1 AND $2 = ANY(s.captain_user_ids)`,
       [id, session.userId],
     );
-    if (r.rowCount === 0) throw new ActionError('NOT_FOUND', '快捷模組不存在或非你建立');
+    if (own.rows.length === 0) {
+      throw new ActionError('NOT_FOUND', '快捷模組不存在或非你關卡');
+    }
+    await query(`DELETE FROM "QuickAction" WHERE id = $1`, [id]);
     revalidatePath('/captain/actions');
     return ok(null);
   } catch (err) {
@@ -243,7 +260,8 @@ async function buildLookupResult(
   const stationCheck = await assertCaptainOfStation(null, captainUserId, stationId);
 
   const stationR = await query<CaptainStation>(
-    `SELECT id, name, description, allow_rebirth, player_max_uses, global_max_uses, global_use_count
+    `SELECT id, name, description, allow_rebirth, allow_stock_sell_multiplier,
+            player_max_uses, global_max_uses, global_use_count
      FROM "Station" WHERE id = $1`,
     [stationId],
   );
@@ -263,7 +281,7 @@ async function buildLookupResult(
 
   const qaR = await query<QuickActionRow>(
     `SELECT qa.id, qa.station_id, s.name AS station_name,
-            qa.owner_user_id, qa.label,
+            qa.label,
             qa.delta_money, qa.delta_health, qa.delta_blessing, qa.delta_karma,
             qa.bound_item_id, i.name AS bound_item_name,
             qa.req_money, qa.req_health, qa.req_blessing, qa.req_karma, qa.req_item_id,
@@ -271,10 +289,11 @@ async function buildLookupResult(
      FROM "QuickAction" qa
      JOIN "Station" s ON s.id = qa.station_id
      LEFT JOIN "Item" i ON i.id = qa.bound_item_id
-     WHERE qa.owner_user_id = $1 AND qa.station_id = $2
+     WHERE qa.station_id = $1
      ORDER BY qa.created_at ASC`,
-    [captainUserId, stationId],
+    [stationId],
   );
+  void captainUserId; // captain 已由 assertCaptainOfStation 驗證
 
   // 玩家當前道具（含名稱 / icon / 描述）
   const itemsR = await query<PlayerScannedItem>(
@@ -378,7 +397,7 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
       await assertNotTourMode(client);
       // 抓快捷模組 + 對應關卡（單一 SQL）
       const qa = await client.query<{
-        id: string; station_id: string; owner_user_id: string;
+        id: string; station_id: string;
         label: string;
         station_name: string;
         delta_money: number; delta_health: number; delta_blessing: number; delta_karma: number;
@@ -393,7 +412,7 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
         station_global_count: number;
         captain_user_ids: string[];
       }>(
-        `SELECT qa.id, qa.station_id, qa.owner_user_id,
+        `SELECT qa.id, qa.station_id,
                 qa.label,
                 s.name AS station_name,
                 qa.delta_money, qa.delta_health, qa.delta_blessing, qa.delta_karma,
@@ -670,13 +689,321 @@ export async function getRecommendedStation(): Promise<ActionResult<CaptainStati
   try {
     const session = await requireRole('captain');
     const r = await query<CaptainStation>(
-      `SELECT id, name, description, allow_rebirth, player_max_uses, global_max_uses, global_use_count
+      `SELECT id, name, description, allow_rebirth, allow_stock_sell_multiplier,
+              player_max_uses, global_max_uses, global_use_count
        FROM "Station"
        WHERE is_active = true AND $1 = ANY(captain_user_ids)
        ORDER BY created_at ASC LIMIT 1`,
       [session.userId],
     );
     return ok(r.rows[0] ?? null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 股票加乘賣出 — 倍率方案 CRUD（關主自管自己關卡的倍率）
+// ─────────────────────────────────────────────────────────────
+const sellMultiplierSchema = z.object({
+  id: z.uuid().optional(),
+  station_id: z.uuid(),
+  label: z.string().min(1).max(60),
+  money_multiplier: z.number().min(0).max(99.99),
+  blessing_penalty_multiplier: z.number().min(0).max(99.99),
+  sort_order: z.number().int().min(0).max(9999),
+  is_active: z.boolean(),
+});
+
+export interface SellMultiplierRow {
+  id: string;
+  station_id: string;
+  label: string;
+  money_multiplier: number;
+  blessing_penalty_multiplier: number;
+  sort_order: number;
+  is_active: boolean;
+}
+
+export async function listMyStationSellMultipliers(): Promise<ActionResult<SellMultiplierRow[]>> {
+  try {
+    const session = await requireRole('captain');
+    // 只列出 captain 被指派的站、且站旗標已開啟的倍率方案
+    const r = await query<SellMultiplierRow>(
+      `SELECT m.id, m.station_id, m.label,
+              m.money_multiplier::float8 AS money_multiplier,
+              m.blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
+              m.sort_order, m.is_active
+       FROM "StationSellMultiplier" m
+       JOIN "Station" s ON s.id = m.station_id
+       WHERE s.allow_stock_sell_multiplier = true
+         AND $1 = ANY(s.captain_user_ids)
+       ORDER BY m.station_id, m.sort_order ASC, m.created_at ASC`,
+      [session.userId],
+    );
+    return ok(r.rows);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function upsertStationSellMultiplier(
+  payload: z.infer<typeof sellMultiplierSchema>,
+): Promise<ActionResult<SellMultiplierRow>> {
+  try {
+    const session = await requireRole('captain');
+    const data = sellMultiplierSchema.parse(payload);
+    // 驗：captain 確實是這個 station 的關主，且 station 有開旗標
+    const stCheck = await assertCaptainOfStation(null, session.userId, data.station_id);
+    if (!stCheck.allow_stock_sell_multiplier) {
+      throw new ActionError('FORBIDDEN', '此關卡未開放股票加乘賣出');
+    }
+    if (data.id) {
+      const r = await query<SellMultiplierRow>(
+        `UPDATE "StationSellMultiplier"
+         SET label=$1, money_multiplier=$2, blessing_penalty_multiplier=$3,
+             sort_order=$4, is_active=$5, updated_at=now()
+         WHERE id=$6 AND station_id=$7
+         RETURNING id, station_id, label,
+                   money_multiplier::float8 AS money_multiplier,
+                   blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
+                   sort_order, is_active`,
+        [data.label, data.money_multiplier, data.blessing_penalty_multiplier,
+         data.sort_order, data.is_active, data.id, data.station_id],
+      );
+      if (r.rows.length === 0) throw new ActionError('NOT_FOUND', '倍率方案不存在');
+      revalidatePath('/captain');
+      revalidatePath('/captain/multipliers');
+      return ok(r.rows[0]);
+    }
+    const r = await query<SellMultiplierRow>(
+      `INSERT INTO "StationSellMultiplier"
+        (station_id, label, money_multiplier, blessing_penalty_multiplier, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, station_id, label,
+                 money_multiplier::float8 AS money_multiplier,
+                 blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier,
+                 sort_order, is_active`,
+      [data.station_id, data.label, data.money_multiplier, data.blessing_penalty_multiplier,
+       data.sort_order, data.is_active],
+    );
+    revalidatePath('/captain');
+    revalidatePath('/captain/multipliers');
+    return ok(r.rows[0]);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteStationSellMultiplier(id: string): Promise<ActionResult<null>> {
+  try {
+    const session = await requireRole('captain');
+    if (!z.uuid().safeParse(id).success) throw new ActionError('INVALID_INPUT', '');
+    // 驗倍率屬於 captain 管轄站
+    const own = await query<{ station_id: string }>(
+      `SELECT m.station_id FROM "StationSellMultiplier" m
+       JOIN "Station" s ON s.id = m.station_id
+       WHERE m.id = $1 AND $2 = ANY(s.captain_user_ids)`,
+      [id, session.userId],
+    );
+    if (own.rows.length === 0) throw new ActionError('FORBIDDEN', '無權刪除此倍率');
+    await query(`DELETE FROM "StationSellMultiplier" WHERE id = $1`, [id]);
+    revalidatePath('/captain');
+    revalidatePath('/captain/multipliers');
+    return ok(null);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 股票加乘賣出 — 玩家持股查看 + 關主代售
+// ─────────────────────────────────────────────────────────────
+export interface CaptainPlayerHolding {
+  stock_id: string;
+  code: string;
+  name: string;
+  shares: number;
+  avg_cost: number;
+  current_price: number;
+  is_sellable: boolean;
+}
+
+export async function listPlayerHoldingsForCaptain(
+  stationId: string,
+  targetUserId: string,
+): Promise<ActionResult<CaptainPlayerHolding[]>> {
+  try {
+    const session = await requireRole('captain');
+    const stCheck = await assertCaptainOfStation(null, session.userId, stationId);
+    if (!stCheck.allow_stock_sell_multiplier) {
+      throw new ActionError('FORBIDDEN', '此關卡未開放股票加乘賣出');
+    }
+    const r = await query<CaptainPlayerHolding>(
+      `SELECT sh.stock_id, st.code, st.name,
+              sh.shares, sh.avg_cost, st.current_price, st.is_sellable
+       FROM "StockHolding" sh
+       JOIN "Stock" st ON st.id = sh.stock_id
+       WHERE sh.user_id = $1 AND sh.shares > 0
+       ORDER BY st.code ASC`,
+      [targetUserId],
+    );
+    return ok(r.rows);
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const captainSellSchema = z.object({
+  stationId: z.uuid(),
+  targetUserId: z.string().min(1),
+  stockId: z.uuid(),
+  shares: z.number().int().positive().max(1_000_000),
+  multiplierId: z.uuid(),
+});
+
+export async function captainSellStockWithMultiplier(
+  payload: z.infer<typeof captainSellSchema>,
+): Promise<ActionResult<{
+  shares_sold: number;
+  proceeds: number;
+  bonus: number;
+  total_money_gain: number;
+  profit: number;
+  blessing_penalty: number;
+  remaining_shares: number;
+}>> {
+  try {
+    const session = await requireRole('captain');
+    const data = captainSellSchema.parse(payload);
+
+    const result = await withTx(async (client) => {
+      await assertNotDuringFinalScoring(client);
+      await assertNotTourMode(client);
+
+      // 驗 captain 是該 station 的關主、station 旗標開啟
+      const stR = await client.query<{ allow_stock_sell_multiplier: boolean; captain_user_ids: string[]; name: string }>(
+        `SELECT allow_stock_sell_multiplier, captain_user_ids, name
+         FROM "Station" WHERE id = $1 AND is_active = true`,
+        [data.stationId],
+      );
+      const station = stR.rows[0];
+      if (!station) throw new ActionError('NOT_FOUND', '關卡不存在');
+      if (!station.captain_user_ids.includes(session.userId)) {
+        throw new ActionError('FORBIDDEN', '你不是此關卡的關主');
+      }
+      if (!station.allow_stock_sell_multiplier) {
+        throw new ActionError('FORBIDDEN', '此關卡未開放股票加乘賣出');
+      }
+
+      // 驗 multiplier 屬於該 station 且啟用
+      const mR = await client.query<{ label: string; money_multiplier: number; blessing_penalty_multiplier: number }>(
+        `SELECT label,
+                money_multiplier::float8 AS money_multiplier,
+                blessing_penalty_multiplier::float8 AS blessing_penalty_multiplier
+         FROM "StationSellMultiplier"
+         WHERE id = $1 AND station_id = $2 AND is_active = true`,
+        [data.multiplierId, data.stationId],
+      );
+      const mult = mR.rows[0];
+      if (!mult) throw new ActionError('NOT_FOUND', '倍率方案不存在或已停用');
+
+      // 驗股票 + 玩家持股
+      const stockR = await client.query<{ current_price: number; code: string; name: string; is_sellable: boolean }>(
+        `SELECT current_price, code, name, is_sellable FROM "Stock" WHERE id = $1`,
+        [data.stockId],
+      );
+      const stock = stockR.rows[0];
+      if (!stock) throw new ActionError('NOT_FOUND', '股票不存在');
+      if (!stock.is_sellable) throw new ActionError('FORBIDDEN', '此商品不可賣回');
+
+      const psR = await client.query<{ money: number; health: number; blessing: number; shares: number; avg_cost: number }>(
+        `SELECT ps.money, ps.health, ps.blessing,
+                COALESCE(sh.shares, 0) AS shares,
+                COALESCE(sh.avg_cost, 0) AS avg_cost
+         FROM "PlayerStats" ps
+         LEFT JOIN "StockHolding" sh ON sh.user_id = ps.user_id AND sh.stock_id = $2
+         WHERE ps.user_id = $1
+         FOR UPDATE OF ps`,
+        [data.targetUserId, data.stockId],
+      );
+      const me = psR.rows[0];
+      if (!me) throw new ActionError('NOT_FOUND', '玩家資料不存在');
+      assertPlayerAlive(me);
+      if (me.shares < data.shares) throw new ActionError('INVALID_INPUT', '持股不足');
+
+      const proceeds = stock.current_price * data.shares;
+      const profit = (stock.current_price - me.avg_cost) * data.shares;
+      // 倍率規則（與圖表一致）：
+      //   profit > 0 → bonus = profit × (moneyMult - 1)、blessing_penalty = ROUND(profit × blessingMult / 10000)
+      //   profit ≤ 0 → bonus = 0、blessing_penalty = 0（賠錢不扣福分）
+      const bonus = profit > 0 ? Math.round(profit * (mult.money_multiplier - 1)) : 0;
+      const totalMoneyGain = proceeds + bonus;
+      const blessingPenalty = profit > 0
+        ? Math.round((profit * mult.blessing_penalty_multiplier) / 10000)
+        : 0;
+
+      const newR = await client.query<{ money: number; blessing: number }>(
+        `UPDATE "PlayerStats"
+         SET money = money + $2,
+             blessing = GREATEST(0, blessing - $3),
+             updated_at = now()
+         WHERE user_id = $1
+         RETURNING money, blessing`,
+        [data.targetUserId, totalMoneyGain, blessingPenalty],
+      );
+
+      const remaining = me.shares - data.shares;
+      if (remaining === 0) {
+        await client.query(
+          `DELETE FROM "StockHolding" WHERE user_id = $1 AND stock_id = $2`,
+          [data.targetUserId, data.stockId],
+        );
+      } else {
+        await client.query(
+          `UPDATE "StockHolding" SET shares = $3, updated_at = now()
+           WHERE user_id = $1 AND stock_id = $2`,
+          [data.targetUserId, data.stockId, remaining],
+        );
+      }
+
+      await client.query(
+        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+         VALUES ($1, $2, 'captain_stock_sell_mult', $3)`,
+        [data.targetUserId, session.userId, JSON.stringify({
+          station_id: data.stationId,
+          station_name: station.name,
+          stock_id: data.stockId,
+          stock_code: stock.code,
+          stock_name: stock.name,
+          shares: data.shares,
+          price: stock.current_price,
+          proceeds,
+          profit,
+          bonus,
+          total_money_gain: totalMoneyGain,
+          blessing_penalty: blessingPenalty,
+          multiplier_id: data.multiplierId,
+          multiplier_label: mult.label,
+          money_multiplier: mult.money_multiplier,
+          blessing_penalty_multiplier: mult.blessing_penalty_multiplier,
+        })],
+      );
+
+      return {
+        shares_sold: data.shares,
+        proceeds,
+        bonus,
+        total_money_gain: totalMoneyGain,
+        profit,
+        blessing_penalty: blessingPenalty,
+        remaining_shares: remaining,
+        new_money: newR.rows[0].money,
+      };
+    });
+
+    revalidatePath('/captain/scan');
+    return ok(result);
   } catch (err) {
     return fail(err);
   }
