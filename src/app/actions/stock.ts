@@ -270,42 +270,48 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
       const divisor = Math.max(1, Number(divisorStr) || 10000);
       const blessingPenalty = profit > 0 ? Math.round(profit / divisor) : 0;
 
-      const newMoneyR = await client.query<{ money: number; blessing: number }>(
-        `UPDATE "PlayerStats"
-         SET money = money + $2,
-             blessing = GREATEST(0, blessing - $3),
-             updated_at = now()
-         WHERE user_id = $1
-         RETURNING money, blessing`,
-        [session.userId, proceeds, blessingPenalty],
-      );
-
       const remaining = me.shares - data.shares;
-      if (remaining === 0) {
-        await client.query(
-          `DELETE FROM "StockHolding" WHERE user_id = $1 AND stock_id = $2`,
-          [session.userId, data.stockId],
-        );
-      } else {
-        // 賣出不改變 avg_cost（部分平倉，剩下的成本不變）
-        await client.query(
-          `UPDATE "StockHolding" SET shares = $3, updated_at = now() WHERE user_id = $1 AND stock_id = $2`,
-          [session.userId, data.stockId, remaining],
-        );
-      }
 
-      await client.query(
-        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
-         VALUES ($1, $1, 'stock_sell', $2)`,
-        [session.userId, JSON.stringify({
-          stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
-          shares: data.shares, price, proceeds, profit, blessing_penalty: blessingPenalty,
-        })],
+      // 末段合併單一 CTE：UPDATE PlayerStats + DELETE/UPDATE StockHolding + INSERT Transaction
+      // 從 3 個 round-trip 降到 1（Tier 2.1）
+      // - DELETE 與 UPDATE 用 CASE-by-condition 兩個 CTE 取代 if-else，CTE 一次定義、實際只觸發其一
+      const r = await client.query<{ new_money: number }>(
+        `WITH paid AS (
+           UPDATE "PlayerStats"
+           SET money = money + $2,
+               blessing = GREATEST(0, blessing - $3),
+               updated_at = now()
+           WHERE user_id = $1
+           RETURNING money
+         ), del AS (
+           DELETE FROM "StockHolding"
+           WHERE user_id = $1 AND stock_id = $4 AND $5::int = 0
+           RETURNING user_id
+         ), upd AS (
+           UPDATE "StockHolding" SET shares = $5, updated_at = now()
+           WHERE user_id = $1 AND stock_id = $4 AND $5::int > 0
+           RETURNING user_id
+         ), tx AS (
+           INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+           SELECT $1, $1, 'stock_sell', $6::jsonb FROM paid
+         )
+         SELECT paid.money AS new_money FROM paid`,
+        [
+          session.userId,                           // $1
+          proceeds,                                  // $2
+          blessingPenalty,                           // $3
+          data.stockId,                              // $4
+          remaining,                                 // $5（=0 觸發 del、>0 觸發 upd，互斥）
+          JSON.stringify({                           // $6
+            stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
+            shares: data.shares, price, proceeds, profit, blessing_penalty: blessingPenalty,
+          }),
+        ],
       );
 
       return {
         shares_sold: data.shares,
-        new_money: newMoneyR.rows[0].money,
+        new_money: r.rows[0].new_money,
         remaining_shares: remaining,
         profit,
       };

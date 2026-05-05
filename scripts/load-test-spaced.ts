@@ -34,11 +34,22 @@ const POOL = 50;
 const SHARES_PER_SELL = 5;
 const SEED_SHARES = 100;
 
-const INTERVALS: Array<{ label: string; ms: number; n: number }> = [
+const ALL_INTERVALS: Array<{ label: string; ms: number; n: number }> = [
   { label: '25ms', ms: 25, n: 500 },
   { label: '600ms', ms: 600, n: 100 },
   { label: '14400ms', ms: 14400, n: 15 },
 ];
+
+// CLI: `--interval=25ms` / `--interval=600ms` / `--interval=14400ms` 只跑單一間隔
+// 不傳就跑全部三組
+const intervalArg = process.argv.find((a) => a.startsWith('--interval='))?.split('=')[1];
+const INTERVALS = intervalArg
+  ? ALL_INTERVALS.filter((i) => i.label === intervalArg)
+  : ALL_INTERVALS;
+if (intervalArg && INTERVALS.length === 0) {
+  console.error(`❌ Unknown --interval=${intervalArg}（可選：25ms / 600ms / 14400ms）`);
+  process.exit(1);
+}
 
 const SCENARIOS = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
 type ScenarioTag = (typeof SCENARIOS)[number];
@@ -230,7 +241,11 @@ async function main() {
     }
 
     const md = renderReport(results, isPgBouncer);
-    const dest = join(process.cwd(), 'docs', 'testspeed_0505_s.md');
+    // 跑單一 interval 時寫到 `_<label>` 後綴檔，免覆蓋 18-combo baseline
+    const filename = intervalArg
+      ? `testspeed_0505_s_${intervalArg}.md`
+      : 'testspeed_0505_s.md';
+    const dest = join(process.cwd(), 'docs', filename);
     writeFileSync(dest, md, 'utf-8');
     console.log(`\n📝 報告已寫入：${dest}`);
   } finally {

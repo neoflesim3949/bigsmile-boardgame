@@ -113,23 +113,30 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
         );
       }
 
-      // upsert PlayerStats（idempotency：WHERE destiny_name IS NULL）
+      // upsert PlayerStats + INSERT Transaction 合併單一 CTE（Tier 2.1）
+      // idempotency 由 `WHERE destiny_name IS NULL` 把關；upd 0-row → tx clause 也不寫
       const upd = await client.query<{
         destiny_name: string;
         money: number; health: number; blessing: number; karma: number;
       }>(
-        `INSERT INTO "PlayerStats"
-           (user_id, destiny_name, money, health, blessing, karma)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (user_id) DO UPDATE SET
-           destiny_name = EXCLUDED.destiny_name,
-           money        = EXCLUDED.money,
-           health       = EXCLUDED.health,
-           blessing     = EXCLUDED.blessing,
-           karma        = EXCLUDED.karma,
-           updated_at   = now()
-         WHERE "PlayerStats".destiny_name IS NULL
-         RETURNING destiny_name, money, health, blessing, karma`,
+        `WITH upsert AS (
+           INSERT INTO "PlayerStats"
+             (user_id, destiny_name, money, health, blessing, karma)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (user_id) DO UPDATE SET
+             destiny_name = EXCLUDED.destiny_name,
+             money        = EXCLUDED.money,
+             health       = EXCLUDED.health,
+             blessing     = EXCLUDED.blessing,
+             karma        = EXCLUDED.karma,
+             updated_at   = now()
+           WHERE "PlayerStats".destiny_name IS NULL
+           RETURNING destiny_name, money, health, blessing, karma
+         ), tx AS (
+           INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+           SELECT $1, $1, 'destiny_draw', $7::jsonb FROM upsert
+         )
+         SELECT * FROM upsert`,
         [
           session.userId,
           chosen.label,
@@ -137,18 +144,6 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
           Math.min(chosen.health, 100),
           chosen.blessing,
           chosen.karma,
-        ],
-      );
-
-      if (upd.rows.length === 0) {
-        throw new ActionError('CONFLICT', '命格抽取失敗，請重新整理');
-      }
-
-      await client.query(
-        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
-         VALUES ($1, $1, 'destiny_draw', $2)`,
-        [
-          session.userId,
           JSON.stringify({
             destiny_name: chosen.label,
             money: chosen.money,
@@ -158,6 +153,10 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
           }),
         ],
       );
+
+      if (upd.rows.length === 0) {
+        throw new ActionError('CONFLICT', '命格抽取失敗，請重新整理');
+      }
 
       return {
         destiny_name: upd.rows[0].destiny_name,
