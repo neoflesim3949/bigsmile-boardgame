@@ -83,8 +83,7 @@ async function setupAccounts() {
   }
 }
 
-async function tryLogin(url: string, loginId: string): Promise<LoginResult> {
-  const t0 = performance.now();
+async function tryLoginOnce(url: string, loginId: string, t0: number): Promise<LoginResult> {
   try {
     const r = await fetch(`${url}/api/loadtest-login`, {
       method: 'POST',
@@ -108,6 +107,35 @@ async function tryLogin(url: string, loginId: string): Promise<LoginResult> {
       client_ms: Math.round(performance.now() - t0),
     };
   }
+}
+
+/**
+ * Exponential backoff + full jitter retry（最多 3 次重試）
+ * - attempt 1: wait 0~1000ms（base 500ms）
+ * - attempt 2: wait 0~2000ms（base 1000ms）
+ * - attempt 3: wait 0~4000ms（base 2000ms）
+ *
+ * Jitter 解決「大家同時 retry 同時撞牆」問題，把 retry 散在時間軸上讓 pool 有空隙服務
+ */
+const USER_ERRORS = ['NOT_FOUND', 'WRONG_PASSWORD', 'LOGIN_LOCKED'] as const;
+const MAX_RETRIES = 3;
+
+async function tryLogin(url: string, loginId: string): Promise<LoginResult> {
+  const t0 = performance.now();
+  let last: LoginResult | null = null;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // exponential backoff base = 500 * 2^(attempt-1)，full jitter [0, 2 × base]
+      const baseMs = 500 * Math.pow(2, attempt - 1);
+      const waitMs = Math.random() * baseMs * 2;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    const r = await tryLoginOnce(url, loginId, t0);
+    if (r.ok) return r;
+    last = r;
+    if (USER_ERRORS.includes((r.reason ?? '') as typeof USER_ERRORS[number])) return r;
+  }
+  return last!;
 }
 
 function summarize(samples: LoginResult[]) {
