@@ -1,7 +1,7 @@
 # 壓測結果 — 500 人並發抽卡 + 買股票
 
 > 自動由 `scripts/load-test.ts` 產出
-> 執行時間：2026-05-05 11:11:13
+> 執行時間：2026-05-05 11:52:29
 
 ## 環境
 
@@ -22,14 +22,14 @@
 ```
 total/ok/fail: 500 / 500 / 0
    error rate: 0.00%
-   wallclock: 6171 ms
-   throughput: 81 req/s
-   latency: avg=3229ms / p50=3218ms / p95=5670ms / p99=5892ms
-   range: 285–6168 ms
+   wallclock: 5673 ms
+   throughput: 88.1 req/s
+   latency: avg=3010ms / p50=3005ms / p95=5385ms / p99=5558ms
+   range: 238–5671 ms
 ```
 
 **驗收門檻（CLAUDE.md §12）**：
-- p95 < 300ms：❌ 不通過（5670ms）
+- p95 < 300ms：❌ 不通過（5385ms）
 - error rate < 0.1%：✅ 通過（0.00%）
 
 ## Phase 2：500 人同時搶買同一檔股票 `buyStock()`
@@ -39,14 +39,14 @@ total/ok/fail: 500 / 500 / 0
 ```
 total/ok/fail: 500 / 500 / 0
    error rate: 0.00%
-   wallclock: 5692 ms
-   throughput: 87.8 req/s
-   latency: avg=2890ms / p50=2869ms / p95=5342ms / p99=5519ms
-   range: 216–5691 ms
+   wallclock: 5455 ms
+   throughput: 91.7 req/s
+   latency: avg=2820ms / p50=2846ms / p95=5212ms / p99=5412ms
+   range: 213–5452 ms
 ```
 
 **驗收門檻**：
-- p95 < 300ms：❌ 不通過（5342ms）
+- p95 < 300ms：❌ 不通過（5212ms）
 - error rate < 0.1%：✅ 通過（0.00%）
 
 **資料一致性檢查**（CLAUDE.md §3.2「不鎖 Stock row」風險驗證）：
@@ -62,14 +62,14 @@ total/ok/fail: 500 / 500 / 0
 ```
 total/ok/fail: 250 / 250 / 0
    error rate: 0.00%
-   wallclock: 480 ms
-   throughput: 520.8 req/s
-   latency: avg=82ms / p50=80ms / p95=132ms / p99=176ms
-   range: 41–185 ms
+   wallclock: 680 ms
+   throughput: 367.6 req/s
+   latency: avg=69ms / p50=54ms / p95=126ms / p99=172ms
+   range: 39–195 ms
 ```
 
 **驗收門檻**：
-- p95 < 300ms：✅ 通過（132ms）
+- p95 < 300ms：✅ 通過（126ms）
 - error rate < 0.1%：✅ 通過（0.00%）
 
 ## Phase 4：強制平倉 — 500 玩家 × 3 檔股票（1500 筆持股）一次平倉 50%
@@ -85,10 +85,10 @@ total/ok/fail: 250 / 250 / 0
 ```
 total/ok/fail: 1 / 1 / 0
    error rate: 0.00%
-   wallclock: 106 ms
-   throughput: 9.4 req/s
-   latency: avg=106ms / p50=106ms / p95=106ms / p99=106ms
-   range: 106–106 ms
+   wallclock: 155 ms
+   throughput: 6.5 req/s
+   latency: avg=154ms / p50=154ms / p95=154ms / p99=154ms
+   range: 154–154 ms
 ```
 
 **寫入結果**：
@@ -99,7 +99,7 @@ total/ok/fail: 1 / 1 / 0
 - 半倉模式驗證：ratio=50% → 應全 UPDATE（除非 shares × ratio < 100） → ✅
 
 **驗收門檻**：
-- p95 < 300ms：✅ 通過（106ms）
+- p95 < 300ms：✅ 通過（154ms）
 - error rate < 0.1%：✅ 通過（0.00%）
 
 ## Phase 5：業力影響 — 500 玩家依當下 karma 取對應 KarmaBand 套四項 delta
@@ -126,10 +126,10 @@ total/ok/fail: 1 / 1 / 0
 ```
 total/ok/fail: 1 / 1 / 0
    error rate: 0.00%
-   wallclock: 59 ms
-   throughput: 16.9 req/s
-   latency: avg=58ms / p50=58ms / p95=58ms / p99=58ms
-   range: 58–58 ms
+   wallclock: 70 ms
+   throughput: 14.3 req/s
+   latency: avg=70ms / p50=70ms / p95=70ms / p99=70ms
+   range: 70–70 ms
 ```
 
 **寫入結果**：
@@ -138,7 +138,7 @@ total/ok/fail: 1 / 1 / 0
 - 平凡 / 微濁 玩家被正確跳過：✅
 
 **驗收門檻**：
-- p95 < 300ms：✅ 通過（58ms）
+- p95 < 300ms：✅ 通過（70ms）
 - error rate < 0.1%：✅ 通過（0.00%）
 
 ## 結論

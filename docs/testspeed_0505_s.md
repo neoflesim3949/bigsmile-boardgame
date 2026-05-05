@@ -3,6 +3,24 @@
 > 由 `scripts/load-test-spaced.ts` 產出
 > 執行時間：2026-05-05 08:11:43（UTC）
 
+/**
+ * 玩家熱路徑壓測 — 6 個情境對照（A/B/C/D/E/F）
+ *
+ * 模擬實際活動中最熱的三個 op：
+ *   - 關主配發快捷模組（applyQuickAction）— 完整 7 步驟（含 QA/Station FOR UPDATE + global_use_count）
+ *   - 玩家買股（buyStock）
+ *   - 玩家賣股（sellStock）— 含賣出福分扣分
+ *
+ * 6 個情境：
+ *   A. 500 純 apply（全打同一 QA）— 同 row 鎖序列化上限
+ *   B. 500 純 buy
+ *   C. 500 純 sell（含賣出福分計算）
+ *   D. 250 apply + 250 buy（一半一半混合）
+ *   E. 250 apply + 125 buy + 125 sell（三向混合，仍單一 QA）
+ *   F. 寫實尖峰：10 關主 × 5 站 × 25 QA + 250 apply + 125 buy + 125 sell（多 QA 分散）
+ *
+ */
+
 ## 為什麼測這 18 個組合？
 
 對照 [testspeed_0505.md](testspeed_0505.md) 是「同一毫秒打 500 發」的同步壓測 — 那是「壓 row lock 上限」的人造極端。本檔測**間隔到達率**，目的：
