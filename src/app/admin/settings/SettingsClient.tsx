@@ -15,6 +15,7 @@ import {
   type DangerOp,
 } from '@/app/actions/admin';
 import type { AppSettingsKey } from '@/lib/settings';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 const THEME_OPTIONS = ['amber', 'teal', 'purple', 'rose', 'sky', 'zinc'] as const;
 type Theme = (typeof THEME_OPTIONS)[number];
@@ -56,6 +57,7 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
   const [editingBand, setEditingBand] = useState<KarmaBandRow | null>(null);
   const [savingSettings, savingSettingsTransition] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -141,7 +143,7 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
           <p className="text-xs text-zinc-500 mb-4">玩家在特定關卡執行重生操作後，將被賦予這些數值。</p>
           <div className="grid grid-cols-2 gap-4">
             <NumField label="重生金錢" color="amber" value={settings.RebirthMoney ?? '500'} onChange={(v) => setField('RebirthMoney', v)} />
-            <NumField label="重生健康" color="rose" value={settings.RebirthHealth ?? '60'} onChange={(v) => setField('RebirthHealth', v)} />
+            <NumField label="重生健康" color="rose" value={settings.RebirthHealth ?? '50'} onChange={(v) => setField('RebirthHealth', v)} />
             <NumField label="重生福分" color="teal" value={settings.RebirthBlessing ?? '5'} onChange={(v) => setField('RebirthBlessing', v)} />
             <NumField label="重生業力" color="purple" value={settings.RebirthKarma ?? '0'} onChange={(v) => setField('RebirthKarma', v)} />
           </div>
@@ -183,7 +185,7 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
                 }}
                 onEdit={() => setEditing(t)}
                 onDelete={async () => {
-                  if (!confirm(`確定刪除命格「${t.label}」？`)) return;
+                  if (!(await confirm({ message: `確定刪除命格「${t.label}」？`, danger: true }))) return;
                   const r = await deleteTemplate(t.id);
                   if (r.ok) {
                     setTemplates((arr) => arr.filter((x) => x.id !== t.id));
@@ -256,7 +258,7 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
                       </button>
                       <button
                         onClick={async () => {
-                          if (!confirm(`確定刪除業力區段「${b.label}」？`)) return;
+                          if (!(await confirm({ message: `確定刪除業力區段「${b.label}」？`, danger: true }))) return;
                           const r = await deleteKarmaBand(b.id);
                           if (r.ok) {
                             setBands((arr) => arr.filter((x) => x.id !== b.id));

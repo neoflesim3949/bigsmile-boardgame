@@ -44,11 +44,26 @@ export function signRefreshToken(
   return { token, maxAge };
 }
 
+const VALID_ROLES: ReadonlyArray<Role> = ['admin', 'player', 'captain'];
+const MAX_USERID_LEN = 64; // Account.user_id 是 TEXT，但實務上 ≤ 32 字夠用，留 buffer
+const MAX_NAME_LEN = 60;
+
 export function verifyAccessToken(token: string): SessionPayload | null {
   try {
     const decoded = jwt.verify(token, authSecret()) as JwtPayload & SessionPayload;
     if (!decoded.userId || !decoded.role) return null;
-    return { userId: decoded.userId, role: decoded.role, name: decoded.name ?? '' };
+    // Defense in depth（code review 0505 M4）：
+    // 即使 AUTH_SECRET 外洩 + 攻擊者偽造 JWT，也限制 role / userId / name 不能塞超長 / 非法值
+    if (!VALID_ROLES.includes(decoded.role)) return null;
+    if (typeof decoded.userId !== 'string' || decoded.userId.length === 0 || decoded.userId.length > MAX_USERID_LEN) {
+      return null;
+    }
+    const rawName = typeof decoded.name === 'string' ? decoded.name : '';
+    return {
+      userId: decoded.userId,
+      role: decoded.role,
+      name: rawName.slice(0, MAX_NAME_LEN),
+    };
   } catch {
     return null;
   }
@@ -155,6 +170,10 @@ export async function assertCaptainOfStation(
   };
 }
 
+/**
+ * @deprecated 玩家寫入 action 一律改用 `assertNotFrozen`（合併兩個檢查為單一 round-trip）。
+ * 此 helper 保留供「僅檢查單一條件」的 admin / debug 場景；新 caller 請優先用 `assertNotFrozen`。
+ */
 export async function assertNotDuringFinalScoring(client?: PoolClient): Promise<void> {
   const sql = `SELECT final_scoring_triggered_at FROM "BoardConfig" WHERE id = 1`;
   const r = client
@@ -168,6 +187,9 @@ export async function assertNotDuringFinalScoring(client?: PoolClient): Promise<
 /**
  * 導覽模式（TourMode）寫入禁止 — 凡會改變玩家四項值 / 持股 / 借貸 / 道具 的 action 都應呼叫。
  * 用途：admin 在大會前帶觀眾走流程示範時開啟，前端可正常瀏覽，但所有寫入靜默拒絕。
+ *
+ * @deprecated 玩家寫入 action 一律改用 `assertNotFrozen`（合併兩個檢查為單一 round-trip）。
+ * 此 helper 保留供「僅檢查單一條件」的 admin / debug 場景；新 caller 請優先用 `assertNotFrozen`。
  */
 export async function assertNotTourMode(client?: PoolClient): Promise<void> {
   const sql = `SELECT value FROM "AppSettings" WHERE key = 'TourMode'`;
@@ -175,6 +197,31 @@ export async function assertNotTourMode(client?: PoolClient): Promise<void> {
     ? await client.query<{ value: string }>(sql)
     : await query<{ value: string }>(sql);
   if (r.rows[0]?.value === 'true') {
+    throw new ActionError('FORBIDDEN', '導覽模式中，所有玩家寫入動作已停用');
+  }
+}
+
+/**
+ * 合併「終局結算」與「導覽模式」兩個寫入凍結檢查 — 任一觸發即拒絕。
+ * 等價於先 `assertNotDuringFinalScoring` 再 `assertNotTourMode`，但只跑 1 個 round-trip。
+ *
+ * 玩家寫入 action 第一行用此 helper 取代兩個分開的 assert（CLAUDE.md §3.2）。
+ * 仍需單獨檢查時保留原本兩個 helper（例如某些 admin 場景僅檢查其一）。
+ */
+export async function assertNotFrozen(client?: PoolClient): Promise<void> {
+  const sql = `
+    SELECT
+      (SELECT final_scoring_triggered_at FROM "BoardConfig" WHERE id = 1) AS fs,
+      (SELECT value FROM "AppSettings" WHERE key = 'TourMode') AS tour
+  `;
+  const r = client
+    ? await client.query<{ fs: string | null; tour: string | null }>(sql)
+    : await query<{ fs: string | null; tour: string | null }>(sql);
+  const row = r.rows[0];
+  if (row?.fs) {
+    throw new ActionError('FORBIDDEN', '終局結算已觸發，玩家寫入操作停用');
+  }
+  if (row?.tour === 'true') {
     throw new ActionError('FORBIDDEN', '導覽模式中，所有玩家寫入動作已停用');
   }
 }

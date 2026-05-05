@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, ArrowDownRight, Megaphone, CalendarDays, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { getBoardData, type BoardData } from '@/app/actions/board';
+import { getSupabaseBrowser } from '@/lib/supabase-browser';
 
 interface Props {
   initial: BoardData;
   token: string;
 }
 
-const POLL_MS = 60_000;
+// 60 秒 fallback：Realtime 漏推（連線 flaky / 跨 publication 漏掉）時的救援。CLAUDE.md §9 / ARCH §14.7
+const FALLBACK_POLL_MS = 60_000;
 
 export default function BoardClient({ initial, token }: Props) {
   const [data, setData] = useState<BoardData>(initial);
@@ -36,13 +38,41 @@ export default function BoardClient({ initial, token }: Props) {
     };
   }, []);
 
-  // 60 秒 fallback polling
+  // 看板資料更新 — Realtime 推 + 60 秒 fallback 輪詢混合（CLAUDE.md §9 / ARCH §14.7）
+  // - 主路徑：訂閱 BoardConfig postgres_changes，admin 推進 / 設跑馬燈 → < 1 秒看板更新
+  // - Fallback：60 秒輪詢救援漏推（連線 flaky 等）
   useEffect(() => {
-    const id = setInterval(async () => {
+    let cancelled = false;
+    const reload = async () => {
       const r = await getBoardData(token);
-      if (r.ok) setData(r.data!);
-    }, POLL_MS);
-    return () => clearInterval(id);
+      if (!cancelled && r.ok) setData(r.data!);
+    };
+
+    // Realtime
+    let unsubscribe: (() => void) | null = null;
+    try {
+      const supabase = getSupabaseBrowser();
+      const ch = supabase
+        .channel(`board-${token.slice(0, 8)}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'BoardConfig', filter: 'id=eq.1' },
+          reload,
+        )
+        .subscribe();
+      unsubscribe = () => { ch.unsubscribe(); };
+    } catch (e) {
+      // env 缺失等情境下退回純 fallback；不擋頁面渲染
+      console.warn('[Realtime] 訂閱失敗，僅靠 60s fallback：', e);
+    }
+
+    // Fallback poll
+    const id = setInterval(reload, FALLBACK_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      unsubscribe?.();
+    };
   }, [token]);
 
   // 時鐘

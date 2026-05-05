@@ -18,6 +18,7 @@ import {
   type StockRow,
   type DisplayTokenRow,
 } from '@/app/actions/admin';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   initialEvents: EventRow[];
@@ -37,6 +38,7 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
   const [tokenDays, setTokenDays] = useState('3');
   const [justIssued, setJustIssued] = useState<{ token: string; jti: string } | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -77,7 +79,7 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
   }
 
   async function handleRevokeToken(jti: string) {
-    if (!confirm('撤銷此 token？對應的看板畫面將立即失效。')) return;
+    if (!(await confirm({ message: '撤銷此 token？對應的看板畫面將立即失效。', danger: true }))) return;
     const r = await revokeDisplayToken(jti);
     if (r.ok) {
       setTokens((arr) => arr.map((t) => t.jti === jti ? { ...t, revoked_at: new Date().toISOString() } : t));
@@ -86,7 +88,7 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
   }
 
   async function handleDeleteToken(jti: string) {
-    if (!confirm('刪除此 token 紀錄？此操作無法復原。')) return;
+    if (!(await confirm({ message: '刪除此 token 紀錄？此操作無法復原。', danger: true }))) return;
     const r = await deleteDisplayToken(jti);
     if (r.ok) {
       setTokens((arr) => arr.filter((t) => t.jti !== jti));
@@ -170,7 +172,7 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
                         </button>
                         <button
                           onClick={async () => {
-                            if (!confirm(`刪除事件「${e.title}」？`)) return;
+                            if (!(await confirm({ message: `刪除事件「${e.title}」？`, danger: true }))) return;
                             const r = await deleteEvent(e.id);
                             if (r.ok) {
                               setEvents((arr) => arr.filter((x) => x.id !== e.id));

@@ -12,6 +12,7 @@ import {
   type ExchangeOptionPayload,
   type BankLoanOptionPayload,
 } from '@/app/actions/admin';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   initialExchange: ExchangeOptionRow[];
@@ -24,6 +25,7 @@ export default function FinanceClient({ initialExchange, initialLoan }: Props) {
   const [editingEx, setEditingEx] = useState<ExchangeOptionRow | 'new' | null>(null);
   const [editingLoan, setEditingLoan] = useState<BankLoanOptionRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -61,7 +63,7 @@ export default function FinanceClient({ initialExchange, initialLoan }: Props) {
                   <button onClick={() => setEditingEx(opt)} className="p-1.5 text-zinc-400 hover:text-amber-400"><Edit2 className="w-4 h-4" /></button>
                   <button
                     onClick={async () => {
-                      if (!confirm(`刪除方案「${opt.label}」？`)) return;
+                      if (!(await confirm({ message: `刪除方案「${opt.label}」？`, danger: true }))) return;
                       const r = await deleteExchangeOption(opt.id);
                       if (r.ok) {
                         setExchange((arr) => arr.filter((x) => x.id !== opt.id));
@@ -116,7 +118,7 @@ export default function FinanceClient({ initialExchange, initialLoan }: Props) {
                   <button onClick={() => setEditingLoan(opt)} className="p-1.5 text-zinc-400 hover:text-amber-400"><Edit2 className="w-4 h-4" /></button>
                   <button
                     onClick={async () => {
-                      if (!confirm(`刪除方案「${opt.label}」？`)) return;
+                      if (!(await confirm({ message: `刪除方案「${opt.label}」？`, danger: true }))) return;
                       const r = await deleteBankLoanOption(opt.id);
                       if (r.ok) {
                         setLoan((arr) => arr.filter((x) => x.id !== opt.id));

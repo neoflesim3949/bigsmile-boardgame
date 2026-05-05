@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { withTx } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
+import { setSetting } from '@/lib/settings';
 import { recomputeAllPlayerScores } from '@/lib/score';
 
 /**
@@ -50,13 +51,9 @@ export async function tickRound(): Promise<
       const newRound = upd.rows[0].current_round;
 
       // 第 1 回合推進後自動關閉導覽模式（admin 已從 demo 進入正式遊戲）
-      // 用 UPSERT 寫 TourMode='false'，與 setSetting helper 同 schema
+      // 走 setSetting helper（傳 client 跑同 tx）— 自動補 settings_update 稽核 row
       if (newRound === 1) {
-        await client.query(
-          `INSERT INTO "AppSettings" (key, value, updated_at)
-           VALUES ('TourMode', 'false', now())
-           ON CONFLICT (key) DO UPDATE SET value = 'false', updated_at = now()`,
-        );
+        await setSetting('TourMode', 'false', session.userId, client);
       }
 
       // 取得本回合的腳本（若有）
@@ -113,12 +110,14 @@ export async function tickRound(): Promise<
       const evText = ev.rows[0]?.event_text?.trim();
       const forceLiqRatio = ev.rows[0]?.force_liquidation_ratio ?? 0;
       if (evText) {
+        // 加 WHERE marquee_until <= now() 避免覆寫 admin 仍生效中的 publishMarquee 公告
+        // （admin 重要訊息不該被 5 分鐘自動到期的事件秒殺）— code review #0504 #10
         await client.query(
           `UPDATE "BoardConfig"
            SET marquee_text = $1,
                marquee_until = now() + interval '5 minutes',
                updated_at = now()
-           WHERE id = 1`,
+           WHERE id = 1 AND (marquee_until IS NULL OR marquee_until <= now())`,
           [evText],
         );
       }
@@ -165,7 +164,9 @@ export async function tickRound(): Promise<
                     'money_gain', 0
                   )
            FROM liquidated`,
-          [forceLiqRatio, newRound, evText || null],
+          // event_text 空時 fallback `回合事件`（不傳 null）— 玩家明細顯示「因『回合事件』股票...被售出」
+          // code review 0505 L6
+          [forceLiqRatio, newRound, evText || '回合事件'],
         );
       }
 

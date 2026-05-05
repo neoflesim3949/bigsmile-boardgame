@@ -9,6 +9,7 @@ import {
   type CaptainStation,
   type SellMultiplierRow,
 } from '@/app/actions/captain';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface ItemLite { id: string; name: string; icon: string }
 
@@ -23,6 +24,7 @@ export default function MultipliersClient({
   const [mults, setMults] = useState<SellMultiplierRow[]>(initialMultipliers);
   const [editing, setEditing] = useState<{ stationId: string; row: SellMultiplierRow | null } | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
   const itemMap = new Map(items.map((i) => [i.id, i]));
 
   function showToast(ok: boolean, msg: string) {
@@ -116,7 +118,7 @@ export default function MultipliersClient({
                             </button>
                             <button
                               onClick={async () => {
-                                if (!confirm(`確定刪除倍率「${m.label}」？`)) return;
+                                if (!(await confirm({ message: `確定刪除倍率「${m.label}」？`, danger: true }))) return;
                                 const r = await deleteStationSellMultiplier(m.id);
                                 if (r.ok) {
                                   setMults((arr) => arr.filter((x) => x.id !== m.id));

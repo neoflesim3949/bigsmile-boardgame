@@ -20,6 +20,7 @@ import {
   type StockScriptCell,
   type ScriptChangeType,
 } from '@/app/actions/admin';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   initialStocks: StockRow[];
@@ -32,6 +33,7 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
   const [editing, setEditing] = useState<StockRow | 'new' | null>(null);
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -39,7 +41,7 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
   }
 
   async function handleDelete(s: StockRow) {
-    if (!confirm(`刪除股票「${s.name}」？所有持股紀錄與歷史價格都會一併刪除。`)) return;
+    if (!(await confirm({ message: `刪除股票「${s.name}」？所有持股紀錄與歷史價格都會一併刪除。`, danger: true }))) return;
     const r = await deleteStock(s.id);
     if (r.ok) {
       setStocks((arr) => arr.filter((x) => x.id !== s.id));
@@ -105,7 +107,7 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
   }
 
   async function handleDeleteRound(round: number) {
-    if (!confirm(`刪除第 ${round} 回合的所有腳本與事件？`)) return;
+    if (!(await confirm({ message: `刪除第 ${round} 回合的所有腳本與事件？`, danger: true }))) return;
     const r = await deleteWholeRoundScript(round);
     if (r.ok) {
       setScripts((s) => {

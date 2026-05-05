@@ -196,16 +196,20 @@ async function simulateDraw(pool: Pool, userId: string): Promise<Sample> {
     } else {
       chosen = { label: '預設命格', money: 1000, health: 80, blessing: 5, karma: 0 };
     }
+    // 合併 UPDATE PlayerStats + INSERT Transaction 成單一 CTE（救 1 個 round-trip）
     await client.query(
-      `UPDATE "PlayerStats"
-       SET destiny_name = $2, money = $3, health = $4, blessing = $5, karma = $6, updated_at = now()
-       WHERE user_id = $1 AND destiny_name IS NULL`,
-      [userId, chosen.label, chosen.money, Math.min(chosen.health, 100), chosen.blessing, chosen.karma],
-    );
-    await client.query(
-      `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
-       VALUES ($1, $1, 'destiny_draw', $2)`,
-      [userId, JSON.stringify({ chosen: chosen.label, load_test: true })],
+      `WITH upd AS (
+         UPDATE "PlayerStats"
+         SET destiny_name = $2, money = $3, health = $4, blessing = $5, karma = $6, updated_at = now()
+         WHERE user_id = $1 AND destiny_name IS NULL
+         RETURNING user_id
+       )
+       INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+       SELECT $1, $1, 'destiny_draw', $7::jsonb FROM upd`,
+      [
+        userId, chosen.label, chosen.money, Math.min(chosen.health, 100), chosen.blessing, chosen.karma,
+        JSON.stringify({ chosen: chosen.label, load_test: true }),
+      ],
     );
     await client.query('COMMIT');
     return { ok: true, ms: Date.now() - t0 };
@@ -240,29 +244,32 @@ async function simulateBuy(pool: Pool, userId: string, stockId: string, shares: 
     if (me.health <= 0 || me.blessing <= 0) throw new Error('PLAYER_DEAD');
     if (me.money < cost) throw new Error('INSUFFICIENT_FUNDS');
 
+    // 合併 UPDATE + UPSERT + INSERT 成單一 CTE（救 2 個 round-trip）
     await client.query(
-      `UPDATE "PlayerStats" SET money = money - $2, updated_at = now() WHERE user_id = $1`,
-      [userId, cost],
-    );
-    await client.query(
-      `INSERT INTO "StockHolding" (user_id, stock_id, shares, avg_cost)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (user_id, stock_id) DO UPDATE SET
-         shares = "StockHolding".shares + EXCLUDED.shares,
-         avg_cost = ROUND(
-           ("StockHolding".shares * "StockHolding".avg_cost + EXCLUDED.shares * $4)
-           / NULLIF("StockHolding".shares + EXCLUDED.shares, 0)
-         ),
-         updated_at = now()`,
-      [userId, stockId, shares, price],
-    );
-    await client.query(
-      `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
-       VALUES ($1, $1, 'stock_buy', $2)`,
-      [userId, JSON.stringify({
-        stock_id: stockId, stock_code: stockR.rows[0].code, stock_name: stockR.rows[0].name,
-        shares, price, cost, load_test: true,
-      })],
+      `WITH paid AS (
+         UPDATE "PlayerStats" SET money = money - $2, updated_at = now()
+         WHERE user_id = $1 RETURNING money
+       ), holding AS (
+         INSERT INTO "StockHolding" (user_id, stock_id, shares, avg_cost)
+         VALUES ($1, $3, $4, $5)
+         ON CONFLICT (user_id, stock_id) DO UPDATE SET
+           shares = "StockHolding".shares + EXCLUDED.shares,
+           avg_cost = ROUND(
+             ("StockHolding".shares * "StockHolding".avg_cost + EXCLUDED.shares * $5)
+             / NULLIF("StockHolding".shares + EXCLUDED.shares, 0)
+           ),
+           updated_at = now()
+         RETURNING user_id
+       )
+       INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+       SELECT $1, $1, 'stock_buy', $6::jsonb FROM paid`,
+      [
+        userId, cost, stockId, shares, price,
+        JSON.stringify({
+          stock_id: stockId, stock_code: stockR.rows[0].code, stock_name: stockR.rows[0].name,
+          shares, price, cost, load_test: true,
+        }),
+      ],
     );
     await client.query('COMMIT');
     return { ok: true, ms: Date.now() - t0 };

@@ -8,6 +8,7 @@ import {
   type StationRow,
   type StationPayload,
 } from '@/app/actions/admin';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Captain { user_id: string; name: string }
 
@@ -20,6 +21,7 @@ export default function StationsClient({ initialStations, captains }: Props) {
   const [stations, setStations] = useState<StationRow[]>(initialStations);
   const [editing, setEditing] = useState<StationRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -27,7 +29,7 @@ export default function StationsClient({ initialStations, captains }: Props) {
   }
 
   async function handleDelete(s: StationRow) {
-    if (!confirm(`確定刪除關卡「${s.name}」？\n關聯的快捷模組與使用紀錄也會被刪除。`)) return;
+    if (!(await confirm({ message: `確定刪除關卡「${s.name}」？\n關聯的快捷模組與使用紀錄也會被刪除。`, danger: true }))) return;
     const r = await deleteStation(s.id);
     if (r.ok) {
       setStations((arr) => arr.filter((x) => x.id !== s.id));

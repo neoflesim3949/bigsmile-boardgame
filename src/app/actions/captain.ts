@@ -6,8 +6,7 @@ import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { query, withTx } from '@/lib/db';
 import {
   assertCaptainOfStation,
-  assertNotDuringFinalScoring,
-  assertNotTourMode,
+  assertNotFrozen,
   assertPlayerAlive,
   assertPlayerDead,
   requireRole,
@@ -359,14 +358,43 @@ export async function lookupPlayerByManualId(
   rawUserId: string,
   stationId: string,
 ): Promise<ActionResult<PlayerLookupResult>> {
+  let session: Awaited<ReturnType<typeof requireRole>> | null = null;
+  let userId = '';
   try {
-    const session = await requireRole('captain');
-    const userId = rawUserId.trim();
+    session = await requireRole('captain');
+    userId = rawUserId.trim();
     if (userId.length < 6) {
       throw new ActionError('INVALID_INPUT', '請輸入完整玩家 ID（≥ 6 碼）');
     }
-    return ok(await buildLookupResult(session.userId, userId, stationId, 'manual'));
+    const result = await buildLookupResult(session.userId, userId, stationId, 'manual');
+    // 稽核（成功路徑）：手動輸入路徑無 QR 在場證明，可枚舉任意玩家
+    // .catch 跟失敗 path 對齊容錯（code review 0505_1 N2）— 否則成功 lookup + audit 寫入 outage
+    // 會被外層 catch 吃掉再寫一筆 fail audit，造成「實際成功但稽核顯示失敗」
+    await query(
+      `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+       VALUES ($1, $2, 'captain_manual_lookup', $3)`,
+      [userId, session.userId, JSON.stringify({ station_id: stationId, outcome: 'success' })],
+    ).catch(() => { /* audit 寫入失敗不擋主流程 */ });
+    return ok(result);
   } catch (err) {
+    // 失敗也留痕（code review 0505 H2）— 否則枚舉攻擊每次「找不到」完全無 audit
+    // user_id 用 captain 自己（actor 視角）避免 FK 失敗（target user_id 可能根本不存在）
+    if (session && userId.length >= 6) {
+      const code = err instanceof ActionError ? err.code : 'INTERNAL';
+      await query(
+        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+         VALUES ($1, $1, 'captain_manual_lookup', $2)`,
+        [
+          session.userId,
+          JSON.stringify({
+            station_id: stationId,
+            target_user_id: userId,
+            outcome: 'fail',
+            code,
+          }),
+        ],
+      ).catch(() => { /* audit 寫入失敗不擋主流程 */ });
+    }
     return fail(err);
   }
 }
@@ -394,8 +422,7 @@ export async function applyQuickAction(p: z.infer<typeof applySchema>): Promise<
     const data = applySchema.parse(p);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
       // 抓快捷模組 + 對應關卡（單一 SQL）
       const qa = await client.query<{
         id: string; station_id: string;
@@ -595,8 +622,7 @@ export async function rebirthPlayer(p: z.infer<typeof rebirthSchema>): Promise<A
     const targetId = decoded.sub;
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
 
       // 關卡 + 重生鍵權限
       const stCheck = await assertCaptainOfStation(client, session.userId, data.stationId);
@@ -881,14 +907,14 @@ export async function captainSellStockWithMultiplier(
   profit: number;
   blessing_penalty: number;
   remaining_shares: number;
+  new_money: number;
 }>> {
   try {
     const session = await requireRole('captain');
     const data = captainSellSchema.parse(payload);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
 
       // 驗 captain 是該 station 的關主、station 旗標開啟
       const stR = await client.query<{ allow_stock_sell_multiplier: boolean; captain_user_ids: string[]; name: string }>(
@@ -983,7 +1009,7 @@ export async function captainSellStockWithMultiplier(
       // 倍率規則（與圖表一致；divisor 由 AppSettings.StockSellBlessingPenaltyDivisor 控制）：
       //   profit > 0 → bonus = profit × (moneyMult - 1)、blessing_penalty = ROUND(profit × blessingMult / divisor)
       //   profit ≤ 0 → bonus = 0、blessing_penalty = 0（賠錢不扣福分）
-      const divisorStr = await getSetting('StockSellBlessingPenaltyDivisor');
+      const divisorStr = await getSetting('StockSellBlessingPenaltyDivisor', client);
       const divisor = Math.max(1, Number(divisorStr) || 10000);
       const bonus = profit > 0 ? Math.round(profit * (mult.money_multiplier - 1)) : 0;
       const totalMoneyGain = proceeds + bonus;

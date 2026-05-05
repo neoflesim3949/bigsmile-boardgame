@@ -5,8 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { query, withTx } from '@/lib/db';
 import {
-  assertNotDuringFinalScoring,
-  assertNotTourMode,
+  assertNotFrozen,
   assertPlayerAlive,
   requireRole,
 } from '@/lib/auth';
@@ -36,14 +35,15 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
   try {
     const session = await requireRole('player');
 
-    const cardDrawMode = await getSetting('CardDrawMode');
-    if (cardDrawMode !== 'true') {
+    // 一次取兩個 settings（drawDestiny 內 tx 不再需要再打 DB 取 MaxDestinyDraws）
+    const settings = await getSettings(['CardDrawMode', 'MaxDestinyDraws']);
+    if (settings.CardDrawMode !== 'true') {
       throw new ActionError('FORBIDDEN', '抽卡模式未啟用');
     }
+    const maxDraws = Math.max(1, Number(settings.MaxDestinyDraws) || 100);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
       // 確保未抽過（idempotency）
       const existing = await client.query<{ destiny_name: string | null }>(
         `SELECT destiny_name FROM "PlayerStats" WHERE user_id = $1 FOR UPDATE`,
@@ -81,9 +81,7 @@ export async function drawDestiny(): Promise<ActionResult<DestinyDrawResult>> {
       };
 
       if (templates.rows.length > 0) {
-        // 取 MaxDestinyDraws 與各命格已抽人數（單條 GROUP BY，無 N+1）
-        const maxDrawsStr = await getSetting('MaxDestinyDraws');
-        const maxDraws = Math.max(1, Number(maxDrawsStr) || 100);
+        // 各命格已抽人數（單條 GROUP BY，無 N+1）；MaxDestinyDraws 由 tx 外的 closure 取得
         const drawnR = await client.query<{ destiny_name: string; cnt: string }>(
           `SELECT destiny_name, COUNT(*)::text AS cnt
            FROM "PlayerStats"
@@ -257,7 +255,8 @@ export async function getMyStats(manual = false): Promise<ActionResult<{ stats: 
     const session = await requireRole('player');
 
     const cooldownStr = await getSetting('ManualRefreshCooldownSeconds');
-    const cooldown = Number(cooldownStr) || 60;
+    // Math.max 防 admin 設負值關閉節流（code review 0505 M2，與 stock.ts:46 對齊）
+    const cooldown = Math.max(1, Number(cooldownStr) || 60);
 
     if (manual) {
       // atomic SQL 節流
@@ -382,8 +381,7 @@ export async function transferMoney(payload: z.infer<typeof transferSchema>): Pr
     if (data.toUserId === session.userId) throw new ActionError('INVALID_INPUT', '不能轉給自己');
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
 
       // 對方必須是 active player
       const target = await client.query<{ name: string }>(
@@ -404,12 +402,15 @@ export async function transferMoney(payload: z.infer<typeof transferSchema>): Pr
       );
       if (stats.rows.length !== 2) throw new ActionError('NOT_FOUND', '玩家資料不完整');
 
-      const me = stats.rows.find((r) => r.user_id === session.userId)!;
+      const me = stats.rows.find((r) => r.user_id === session.userId);
+      if (!me) throw new ActionError('NOT_FOUND', '玩家資料不完整');
       assertPlayerAlive(me);
 
-      // 手續費（預設 0）
-      const feeStr = await getSetting('TransferFeeRate');
-      const feeRate = Number(feeStr) || 0;
+      // 手續費（預設 0）— 防 NaN（#3.6）+ clamp 負值（code review 0505 L5）
+      // 負 feeRate 會讓 totalDebit < amount，等於系統補貼轉帳，無設計需求，clamp 0
+      const feeStr = await getSetting('TransferFeeRate', client);
+      const feeRateRaw = Number(feeStr);
+      const feeRate = Number.isFinite(feeRateRaw) ? Math.max(0, feeRateRaw) : 0;
       const fee = Math.floor(data.amount * feeRate);
       const totalDebit = data.amount + fee;
       if (me.money < totalDebit) {
@@ -543,8 +544,7 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
     const data = exchangeSchema.parse(payload);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
       const opt = await client.query<{ label: string; blessing_cost_per_unit: number; money_gain_per_unit: number }>(
         `SELECT label, blessing_cost_per_unit, money_gain_per_unit
          FROM "ExchangeOption" WHERE id = $1 AND is_active = true`,
@@ -563,7 +563,7 @@ export async function exchangeBlessing(payload: z.infer<typeof exchangeSchema>):
       // 套用 dashboard 即時權重倍率（admin 在 /admin 上調整 ExchangeRateMultiplier）
       // 算法跟 listExchangeOptionsForPlayer 一致：先 round 出 effective per_unit，
       // 再乘 units（避免「顯示 +200、實際 +199」的 rounding 爭議）
-      const multStr = await getSetting('ExchangeRateMultiplier');
+      const multStr = await getSetting('ExchangeRateMultiplier', client);
       const mult = Number(multStr) || 1.0;
       const effectivePerUnit = Math.round(opt.rows[0].money_gain_per_unit * mult);
 
@@ -695,8 +695,7 @@ export async function borrowFromBank(payload: z.infer<typeof borrowSchema>): Pro
     const data = borrowSchema.parse(payload);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
       const opt = await client.query<{
         label: string;
         blessing_collateral_per_unit: number;
@@ -798,8 +797,7 @@ export async function repayBank(payload: z.infer<typeof repaySchema>): Promise<A
     const data = repaySchema.parse(payload);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
       const stats = await client.query<{ money: number; health: number; blessing: number; bank_loan: number }>(
         `SELECT money, health, blessing, bank_loan FROM "PlayerStats" WHERE user_id = $1 FOR UPDATE`,
         [session.userId],
@@ -930,7 +928,7 @@ export async function getMyHistory(type: HistoryType): Promise<ActionResult<{
 
     // 規格：福分/業力 受 ShowAllStats 與 final_scoring 雙重控管
     if ((type === 'blessing' || type === 'karma') && !showAllStats && !scoringDone) {
-      throw new Error('FORBIDDEN');
+      throw new ActionError('FORBIDDEN', '此指標歷史活動結束後才公開');
     }
 
     const ps = await query<{ money: number; health: number; blessing: number; karma: number }>(

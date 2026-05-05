@@ -17,6 +17,7 @@ import {
   type AdminDashboardData,
 } from '@/app/actions/admin';
 import { tickRound } from '@/app/actions/round';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   initial: AdminDashboardData;
@@ -36,6 +37,7 @@ export default function AdminDashboardClient({ initial }: Props) {
   const [marqueeMins, setMarqueeMins] = useState(60);
   const [busy, busyTransition] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   // 風雲榜排序 + 分頁狀態
   type SortKey = 'final_score' | 'money' | 'blessing' | 'health' | 'karma' | 'rebirth_count';
@@ -103,8 +105,12 @@ export default function AdminDashboardClient({ initial }: Props) {
     });
   }
 
-  function handleTriggerScoring() {
-    if (!confirm('觸發終局結算？\n玩家寫入操作將全部停用，看板自動切換為最終排行榜。\n此操作不可復原。')) return;
+  async function handleTriggerScoring() {
+    if (!(await confirm({
+      message: '觸發終局結算？\n玩家寫入操作將全部停用，看板自動切換為最終排行榜。\n此操作不可復原。',
+      danger: true,
+      confirmText: '觸發結算',
+    }))) return;
     busyTransition(async () => {
       const r = await triggerFinalScoring();
       if (r.ok) {
@@ -178,11 +184,13 @@ export default function AdminDashboardClient({ initial }: Props) {
   }
 
   function submitCustomMultiplier() {
-    const v = Number(customInput);
-    if (!Number.isFinite(v) || v < 0 || v > 10) {
+    const raw = Number(customInput);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 10) {
       showToast(false, '倍率需介於 0–10 之間');
       return;
     }
+    // step="0.01" 但若 admin 輸入 1.123 直接 truncate 後續位數，標準化到小數兩位
+    const v = Math.round(raw * 100) / 100;
     setCustomOpen(false);
     handleSetMultiplier(v);
   }

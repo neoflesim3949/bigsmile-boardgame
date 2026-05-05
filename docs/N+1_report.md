@@ -1,8 +1,13 @@
 # N+1 問題稽核報告 — 開運大富翁 V2
 
-> 稽核日期：2026-05-02
-> 範圍：`src/app/actions/**`（所有 server actions）+ 主要讀取路徑
-> 結論：**沒有真正會炸的 N+1**。所有列表撈取都用 JOIN / 嵌套 / 批次 SQL。少數技術上是 N+1 但 N 是固定 small constant（≤ 20），可忽略。
+## 稽核時間軸
+
+| 日期 | 觸發 | 結果 |
+|------|------|------|
+| **2026-05-02** | 全 codebase 首輪稽核 | 2 處 small-N N+1（`tickRound` 對股票、`updateAppSettings` 對 setting），都判定不值得修 |
+| **2026-05-05** | round-trip 優化波 + 29 項 review fixes + 13 條 review fixes 後重稽核 | **無新增 N+1**。原 2 處 small-N 仍在（同樣不值得修） |
+
+**結論**：**沒有真正會炸的 N+1**。所有列表撈取都用 JOIN / 嵌套 / 批次 SQL。少數技術上是 N+1 但 N 是固定 small constant（≤ 20），可忽略。
 
 ---
 

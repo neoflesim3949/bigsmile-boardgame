@@ -12,6 +12,7 @@ import {
 } from '@/app/actions/admin';
 import { RotateCcw } from 'lucide-react';
 import type { Role } from '@/lib/auth';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   initialRows: AccountRow[];
@@ -34,6 +35,7 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
   const [pwReset, setPwReset] = useState<AccountRow | null>(null);
   const [pendingSearch, startSearch] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -148,7 +150,7 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
                       {row.role === 'player' && (
                         <button
                           onClick={async () => {
-                            if (!confirm(`重置玩家「${row.name}」的遊戲狀態？\n清空：四項參數、命格、持股、借貸、道具\n保留：帳號\n此操作不可復原。`)) return;
+                            if (!(await confirm({ message: `重置玩家「${row.name}」的遊戲狀態？\n清空：四項參數、命格、持股、借貸、道具\n保留：帳號\n此操作不可復原。`, danger: true, confirmText: '執行重置' }))) return;
                             const r = await resetSinglePlayer(row.user_id);
                             if (r.ok) showToast(true, `已重置 ${row.name}`);
                             else showToast(false, r.error?.message ?? '重置失敗');
@@ -168,7 +170,7 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!confirm(`確定刪除帳號「${row.name}」？此操作不可復原。`)) return;
+                          if (!(await confirm({ message: `確定刪除帳號「${row.name}」？此操作不可復原。`, danger: true }))) return;
                           const r = await deleteAccount(row.user_id);
                           if (r.ok) {
                             setRows((arr) => arr.filter((x) => x.user_id !== row.user_id));

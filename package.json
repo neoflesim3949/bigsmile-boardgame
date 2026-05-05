@@ -16,6 +16,7 @@
     "load:test": "tsx scripts/load-test.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.105.3",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "html-to-image": "^1.11.13",

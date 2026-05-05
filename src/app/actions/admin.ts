@@ -889,14 +889,16 @@ export async function setRoundEvent(round: number, text: string): Promise<Action
     if (!Number.isInteger(round) || round <= 0) throw new ActionError('INVALID_INPUT', '');
     const trimmed = text.trim();
     if (trimmed === '') {
-      // 文字為空但仍可能有強制平倉比例 → 不刪整 row，只清 text
+      // 文字為空但仍可能有強制平倉比例 → 用 CTE 把 UPDATE + 條件 DELETE 包成單一 atomic SQL
+      // 防止 admin 同時操作另一個 setter 造成中間態（code review #0504 #12）
       await query(
-        `UPDATE "StockRoundEvent" SET event_text = '', updated_at = now() WHERE round = $1`,
-        [round],
-      );
-      // 若該回合 ratio 也是 0，整 row 沒意義就刪
-      await query(
-        `DELETE FROM "StockRoundEvent" WHERE round = $1 AND event_text = '' AND force_liquidation_ratio = 0`,
+        `WITH upd AS (
+           UPDATE "StockRoundEvent" SET event_text = '', updated_at = now()
+           WHERE round = $1
+           RETURNING round, force_liquidation_ratio
+         )
+         DELETE FROM "StockRoundEvent"
+         WHERE round IN (SELECT round FROM upd WHERE force_liquidation_ratio = 0)`,
         [round],
       );
     } else {
@@ -924,13 +926,15 @@ export async function setRoundForceLiquidation(round: number, ratio: number): Pr
     if (!Number.isInteger(round) || round <= 0) throw new ActionError('INVALID_INPUT', '');
     const r = Math.max(0, Math.min(100, Math.floor(ratio)));
     if (r === 0) {
-      // 0 → 若該 row 也沒事件文字就刪掉，否則 UPDATE
+      // 0 → 用 CTE 包 UPDATE + 條件 DELETE 為 atomic（同 setRoundEvent 模式）
       await query(
-        `UPDATE "StockRoundEvent" SET force_liquidation_ratio = 0, updated_at = now() WHERE round = $1`,
-        [round],
-      );
-      await query(
-        `DELETE FROM "StockRoundEvent" WHERE round = $1 AND event_text = '' AND force_liquidation_ratio = 0`,
+        `WITH upd AS (
+           UPDATE "StockRoundEvent" SET force_liquidation_ratio = 0, updated_at = now()
+           WHERE round = $1
+           RETURNING round, event_text
+         )
+         DELETE FROM "StockRoundEvent"
+         WHERE round IN (SELECT round FROM upd WHERE event_text = '')`,
         [round],
       );
     } else {
@@ -1185,6 +1189,11 @@ export async function deleteEvent(id: string): Promise<ActionResult<null>> {
 }
 
 // 跑馬燈：寫入 BoardConfig.marquee_text + marquee_until
+//
+// **主動發送：允許覆寫舊廣告（含未到期者）— 與 tickRound round-event 自動覆寫不同**
+// （tickRound 的 round-event 帶 `WHERE marquee_until <= now()` guard 防自動覆寫；
+//  admin 主動操作刻意不擋，因 admin 想換掉自己上一條公告是合理操作）
+// 對應 code review 0505 M3
 export async function publishMarquee(text: string, ttlMinutes: number): Promise<ActionResult<null>> {
   try {
     await requireRole('admin');
@@ -1611,7 +1620,6 @@ export async function triggerFinalScoring(): Promise<ActionResult<{ triggered_at
  * - PlayerLoan（借貸）
  * - PlayerItem（道具）
  * - StockHistory（股價歷史曲線）
- * - StockRoundScript / StockRoundEvent（股市回合腳本）
  * - StationUsage / QuickActionUsage（使用次數紀錄）
  * - Station.global_use_count = 0、QuickAction.global_use_count = 0
  * - BoardConfig 場次狀態（current_round / last_tick_at / marquee / final_scoring_triggered_at）
@@ -1625,8 +1633,9 @@ export async function triggerFinalScoring(): Promise<ActionResult<{ triggered_at
  * - Account（帳號）
  * - Stock 商品定義（current_price 保留，作為新場起始價）
  * - Item / Station / QuickAction / InitialValueTemplate 定義
+ * - **StockRoundScript / StockRoundEvent**（admin 預設的股市回合腳本，場次間保留）
  * - ExchangeOption / BankLoanOption 方案
- * - Transaction 稽核紀錄（不刪歷史）
+ * - Transaction：admin 操作（user_id 為 admin 的）保留；player tx_type 全清
  *
  * **不可復原**。前端應有 5 次確認彈窗。
  */
@@ -1656,11 +1665,13 @@ export async function restartGameCycle(): Promise<ActionResult<{ reset_at: strin
       await client.query(`DELETE FROM "QuickActionUsage"`);
       // 5. 事件回到「未啟用」起始
       await client.query(`UPDATE "Event" SET is_active = false`);
-      // 6. 玩家四項值歷史明細（含 quick_action / stock_buy / stock_sell / transfer / exchange / bank_*）
-      //    保留 admin 操作日誌（actor='admin' 且 tx_type IN ('settings_update','danger_zone_reset','final_scoring')）
+      // 6. 刪除 user_id 屬 player 角色的所有 Transaction（含所有 tx_type — quick_action / stock_buy / stock_sell / transfer / exchange / bank_* / 等）
+      //    admin 操作的 Transaction 因 user_id 是 admin（不在 player 名單內）而被自然保留
+      //    例外：captain_manual_lookup audit 跨場次保留，便於事後分析枚舉攻擊（code review 0505 L4）
       await client.query(
         `DELETE FROM "Transaction"
-         WHERE user_id IN (SELECT user_id FROM "Account" WHERE role = 'player')`,
+         WHERE user_id IN (SELECT user_id FROM "Account" WHERE role = 'player')
+           AND tx_type NOT IN ('captain_manual_lookup')`,
       );
       // 6b. 推進歷史紀錄（admin 寫的 round_tick 不會被上面 player-only 清掉）
       await client.query(`DELETE FROM "Transaction" WHERE tx_type = 'round_tick'`);

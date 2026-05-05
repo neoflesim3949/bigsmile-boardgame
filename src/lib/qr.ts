@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
  * 玩家 QR / display token 用 HMAC-SHA256 簽章。
@@ -40,7 +40,7 @@ export function signQrToken(sub: string, kind: QrKind, ttlSeconds: number): stri
   const payload: QrPayload = {
     sub,
     kind,
-    nonce: randomBytes(8).toString('hex'),
+    nonce: randomBytes(16).toString('hex'),
     exp: Math.floor(Date.now() / 1000) + ttlSeconds,
   };
   const payloadB64 = b64url(JSON.stringify(payload));
@@ -54,7 +54,10 @@ export function verifyQrToken(
   const parts = token.split('.');
   if (parts.length !== 2) return null;
   const [payloadB64, sig] = parts;
-  if (sign(payloadB64) !== sig) return null;
+  // Constant-time HMAC 比較（code review 0505 L2）— 防 timing attack 漸近發現有效簽章
+  const expected = Buffer.from(sign(payloadB64));
+  const actual = Buffer.from(sig);
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
   let payload: QrPayload;
   try {
     payload = JSON.parse(fromB64url(payloadB64).toString('utf8'));

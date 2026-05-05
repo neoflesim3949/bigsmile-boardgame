@@ -67,6 +67,9 @@
   - 玩家互轉、股票買賣、套用快捷模組、換匯、發放道具
 - 多 row 鎖：固定 `user_id` 升序排序避免死鎖
 - **不鎖 `Stock` row**：股價以呼叫當下 `current_price` 成交（避免買賣序列化）
+- **tx 內取 / 寫 setting 一律傳 `client`**：`getSetting(key, client)` / `getSettings(keys, client)` / `setSetting(key, value, actor, client)`。**禁用** standalone — 否則會走獨立連線占用第 2 個 pool slot，500 並發雙倍消耗 pool（pool=10 production 等於 10% 直接浪費）
+- **凍結態檢查用合併 helper**：玩家寫入 action 第一行用 `assertNotFrozen(client)` 取代 `assertNotDuringFinalScoring + assertNotTourMode`（從 2 個 round-trip 降到 1）
+- **多表寫入合併 CTE**：UPDATE PlayerStats + UPSERT StockHolding + INSERT Transaction 等同一 tx 內的多次 row 寫入應合併成單一 CTE，從 3 個 round-trip 降到 1（範例見 [stock.ts buyStock](src/app/actions/stock.ts)）
 
 ### 3.3 防止 N+1（最常見效能殺手）
 
@@ -242,6 +245,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - 觸控目標 ≥ 44px
 - 避免 `fixed` / `absolute` 元素在小螢幕互相覆蓋
 - 寫死 px（`w-96`、`p-10`、`text-5xl`）必須有手機版對應
+- **禁用 `window.confirm()` / `window.alert()`**：mobile Safari / 部分桌面 Chrome 會擋。一律用 `useConfirm()`（[components/shared/ConfirmProvider.tsx](src/components/shared/ConfirmProvider.tsx)）— 自帶 destructive flag、可自訂按鈕文字、樣式跟主題對齊。`<ConfirmProvider>` 已包在 `/admin/layout.tsx` 與 `/captain/layout.tsx`；玩家 / display 路由若未來需要也要先加 provider
 
 ### 6.2 特殊頁面要求
 - **`/admin/*` 桌面優先**（≥1280px 為主要設計斷點，**ThemeProvider 強制深色 + md 字級**，不跟玩家偏好）：可直接擺寬表格、側欄、多欄 dashboard；**手機仍須能訪問**（不破版、能看懂、能執行核心操作即可，不必逐元件響應式優化）
@@ -394,6 +398,9 @@ app/
 - [ ] 字串拼接 SQL（如 `` `WHERE name = '${input}'` ``）
 - [ ] 多表寫入沒有用 pg 交易包裹
 - [ ] 對 `Stock` row 加 `FOR UPDATE` 鎖（**禁止**，股價以呼叫當下 `current_price` 成交即可）
+- [ ] tx 內呼叫 `getSetting(key)` / `getSettings(keys)` / `setSetting(...)` 沒傳 `client`（→ 占第 2 個 connection；應改 `getSetting(key, client)` 走同一 tx，CLAUDE.md §3.2）
+- [ ] 玩家寫入 action 同時用 `assertNotDuringFinalScoring(client)` + `assertNotTourMode(client)`（→ 2 個 round-trip；應改 `assertNotFrozen(client)` 一行搞定，CLAUDE.md §3.2）
+- [ ] 同 tx 內多次連續 `UPDATE` / `INSERT` / `UPSERT` 沒合併成 CTE（→ 每多 1 個 round-trip ~20ms，500 並發累計 p95 拖慢 0.3-1s；用 `WITH paid AS (UPDATE ... RETURNING), holding AS (INSERT ... RETURNING), tx AS (INSERT ...) SELECT ...` 模式合併。CLAUDE.md §3.2 / 範例見 [stock.ts buyStock](src/app/actions/stock.ts)）
 
 ### 安全
 - [ ] `dangerouslySetInnerHTML` 套到玩家輸入
@@ -428,6 +435,7 @@ app/
 - [ ] 玩家 / 關主前台路由用 `text-[Npx]` 寫死字級 — 字級偏好設定會無法縮放，**必須改 `text-[Nrem]`**（10px → `text-[0.625rem]`、11px → `text-[0.6875rem]`）；後台 / 看板因強制 md 不受此限
 - [ ] 漲跌只用紅綠沒加箭頭（color-blind 友善必加 ↑↓）；**flat / 持平**用 `lucide Minus` icon（`−` 形狀）會被誤認為「股價是負數」，要改成 invisible spacer 維持對齊
 - [ ] 觸控目標 < 44px
+- [ ] 用 `window.confirm` / `window.alert`（→ mobile Safari 會擋；改用 `useConfirm()`，CLAUDE.md §6.1）
 - [ ] Scanner 沒用 dynamic import 導致 SSR 錯誤
 - [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補。**已補的色系**：`bg-zinc-950/{30,70,85}`、`bg-{amber/emerald/teal/rose/purple/sky}-500/{10,15,20}`、`border-{amber/emerald/teal/rose/purple/sky}-500/30`、`border-zinc-{700,800}/{50,60}`、`text-{purple/sky}-400`、`text-yellow-300`、`text-amber-500`
 - [ ] 看板 `/display/board` 終局結算後 toggle 「返回常規模式」無效 — 不可寫 `isFinal = forceFinal || final_scoring_triggered_at`（被 server 鎖死），要改成 `userOverride !== null ? userOverride : serverIsFinal` 讓 user 真的能切回看股市

@@ -67,11 +67,18 @@ interface ZodLikeError {
 }
 
 function isZodError(err: unknown): err is ZodLikeError {
+  if (typeof err !== 'object' || err === null || !('issues' in err)) return false;
+  const issues = (err as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) return false;
+  // 加深 structural check：必須是空陣列或第一個 issue 含有 zod 結構（code + path + message）
+  if (issues.length === 0) return true;
+  const first = issues[0];
   return (
-    typeof err === 'object' &&
-    err !== null &&
-    'issues' in err &&
-    Array.isArray((err as { issues?: unknown }).issues)
+    typeof first === 'object' &&
+    first !== null &&
+    typeof (first as { code?: unknown }).code === 'string' &&
+    Array.isArray((first as { path?: unknown }).path) &&
+    typeof (first as { message?: unknown }).message === 'string'
   );
 }
 

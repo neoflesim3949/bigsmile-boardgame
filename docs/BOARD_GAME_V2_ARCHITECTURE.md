@@ -1318,6 +1318,7 @@ CREATE UNIQUE INDEX uniq_account_login
   - `DATABASE_URL`（pooled，6543）— Server Actions 走這條
   - `DIRECT_URL`（直連，5432）— migration 才用
 - Vercel function 設 `maxDuration: 10`（多數操作 < 1s，給點餘裕避免冷啟動踩線）
+- **tx 內取 setting 必傳 `client`**（CLAUDE.md §3.2）：`getSetting(key, client)` / `getSettings(keys, client)`。否則會走 standalone `query()` 取另一條 pool 連線 — pool=10 下這是 10% 的浪費，500 並發時雙倍消耗 pool slot
 
 ### 14.6 前端效能
 - Next.js App Router 自動 code-split（每個 route 一包）
@@ -1330,10 +1331,15 @@ CREATE UNIQUE INDEX uniq_account_login
 ### 14.7 Realtime vs 輪詢決策
 | 條件 | 建議 |
 |------|------|
-| 活動看板（1～3 台） | **推→拉混合**（詳見 §11）：訂閱 `BoardConfig` 信號 + `Event` Realtime；收到信號後拉 `getBoardData` 取整合快照；60 秒 fallback 拉取救援漏推 |
+| 活動看板（1～3 台） | **推→拉混合（已實作）**：[BoardClient.tsx](../src/app/display/board/BoardClient.tsx) 訂閱 `BoardConfig` postgres_changes（`event: '*'`、`filter: id=eq.1`）；收到信號 → 呼叫 `getBoardData(token)` server action 取整合快照（不直接 SELECT 避開 RLS）；60 秒 `setInterval` fallback 救援漏推。Browser client 在 [lib/supabase-browser.ts](../src/lib/supabase-browser.ts)（lazy singleton、anon key、`persistSession: false`） |
 | 玩家股市介面 / 玩家頁 | **完全不輪詢、不訂閱**：進頁面拉一次、自身 action response 帶回新值、按「🔄 重新整理」手動拉（60 秒節流，詳見 §5.1） |
 | 關主前台掃碼後讀玩家狀態 | 一次性 `lookupPlayerByQR`，不需 Realtime |
 | 關主快捷模組清單 | 一次性載入後 `localStorage` / SWR 快取，不重撈（活動中極少變動） |
+
+**Supabase Realtime 設定**：
+1. **Migration 自動處理**：`supabase/migrations/0015_board_realtime_publication.sql` 已用 `IF EXISTS` 守衛 + duplicate_object 容錯，把 `BoardConfig` 加入 `supabase_realtime` publication（本地 PG 無 publication 也可跑）
+2. 部署時若 Supabase Dashboard 顯示 BoardConfig 不在 publication 內，跑 migration 即可
+3. WS quota 評估：free tier ≤ 200 並發 WS；本系統最多 3 台看板 + 偶發 admin 預覽，遠低於上限
 
 > **設計核心**：500 人 + Supabase 免費版，刻意設計為**事件驅動 + 主動刷新**而非輪詢。整場活動 DB 寫入量峰值在「玩家股市買賣 ≤ 120 req/s」與「主持人按下一回合（每 10 分鐘 1 次）」這兩處。
 >
@@ -1427,6 +1433,41 @@ const result = await pool.query(`
   WHERE pi.user_id = $1
 `, [uid])
 ```
+
+##### 模式 D：合併多表寫入用 CTE（與 N 無關，純減 round-trip）
+單次 server action 內若需要 UPDATE A + UPSERT B + INSERT C 連續寫入（例：buyStock 的 PlayerStats + StockHolding + Transaction），這不是 N+1（資料筆數固定 = 1），但**每多 1 個 round-trip ~20ms**，500 並發累計 p95 拖慢 0.3-1s。用 CTE 合併：
+
+```ts
+// ❌ 3 個 round-trip
+await client.query(`UPDATE "PlayerStats" SET money = money - $2 RETURNING money`, ...)
+await client.query(`INSERT INTO "StockHolding" ... ON CONFLICT DO UPDATE ... RETURNING ...`, ...)
+await client.query(`INSERT INTO "Transaction" ...`, ...)
+
+// ✅ 1 個 round-trip
+await client.query(`
+  WITH paid AS (
+    UPDATE "PlayerStats" SET money = money - $2, updated_at = now()
+    WHERE user_id = $1 RETURNING money
+  ), holding AS (
+    INSERT INTO "StockHolding" (user_id, stock_id, shares, avg_cost) VALUES ($1, $3, $4, $5)
+    ON CONFLICT (user_id, stock_id) DO UPDATE SET
+      shares = "StockHolding".shares + EXCLUDED.shares,
+      avg_cost = ROUND(("StockHolding".shares * "StockHolding".avg_cost + EXCLUDED.shares * $5)
+                       / NULLIF("StockHolding".shares + EXCLUDED.shares, 0)),
+      updated_at = now()
+    RETURNING shares, avg_cost
+  ), tx AS (
+    INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+    VALUES ($1, $1, 'stock_buy', $6::jsonb)
+  )
+  SELECT paid.money AS new_money, holding.shares, holding.avg_cost
+  FROM paid, holding;
+`, [...])
+```
+
+前置條件：CTE 之前已用 `SELECT FOR UPDATE` 驗過先決條件（餘額足、生死、is_sellable…），CTE 進來時必然 UPDATE 1 row。錯誤分類仍保留在前面的 `SELECT FOR UPDATE` 後 throw 對應 `ActionError`。
+
+實際範例：[stock.ts buyStock](../src/app/actions/stock.ts) — 從 9 個 round-trip 降到 5。
 
 #### 看板行情總表 + sparkline 的特殊解法
 要為**每檔股票**取近 N 筆 `StockHistory` 無法用普通 JOIN（會笛卡爾積爆炸）。用 `LATERAL JOIN`：

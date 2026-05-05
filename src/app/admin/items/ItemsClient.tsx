@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { Package, Plus, Edit2, Trash2, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { upsertItem, deleteItem, type ItemRow, type ItemPayload } from '@/app/actions/admin';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props { initialItems: ItemRow[] }
 
@@ -10,6 +11,7 @@ export default function ItemsClient({ initialItems }: Props) {
   const [items, setItems] = useState<ItemRow[]>(initialItems);
   const [editing, setEditing] = useState<ItemRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -17,7 +19,7 @@ export default function ItemsClient({ initialItems }: Props) {
   }
 
   async function handleDelete(item: ItemRow) {
-    if (!confirm(`刪除道具「${item.name}」？玩家持有的此道具與綁定快捷模組的關聯也會一併處理。`)) return;
+    if (!(await confirm({ message: `刪除道具「${item.name}」？玩家持有的此道具與綁定快捷模組的關聯也會一併處理。`, danger: true }))) return;
     const r = await deleteItem(item.id);
     if (r.ok) {
       setItems((arr) => arr.filter((x) => x.id !== item.id));

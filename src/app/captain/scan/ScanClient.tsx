@@ -23,6 +23,7 @@ import {
   type CaptainPlayerHolding,
 } from '@/app/actions/captain';
 import { Search, TrendingUp } from 'lucide-react';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface Props {
   captainUserId: string;
@@ -67,6 +68,7 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
   const [sellTarget, setSellTarget] = useState<CaptainPlayerHolding | null>(null);
   const [inProgress, setInProgress] = useState<InProgressItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const confirm = useConfirm();
 
   // 載入 localStorage 暫存（避免不小心離開頁面遺失進行列表）
   useEffect(() => {
@@ -254,9 +256,13 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
     });
   }
 
-  function handleRebirth() {
+  async function handleRebirth() {
     if (!scanned || !scanned.qrToken) return;
-    if (!confirm(`重生玩家「${scanned.player.name}」？\n清空：四項參數歸零、所有持股、銀行借款、所有道具\n此操作不可復原。`)) return;
+    if (!(await confirm({
+      message: `重生玩家「${scanned.player.name}」？\n清空：四項參數歸零、所有持股、銀行借款、所有道具\n此操作不可復原。`,
+      danger: true,
+      confirmText: '執行重生',
+    }))) return;
     busyTransition(async () => {
       const r = await rebirthPlayer({ qrToken: scanned.qrToken!, stationId });
       if (r.ok) {

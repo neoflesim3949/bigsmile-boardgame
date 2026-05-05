@@ -128,7 +128,7 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
           <button
             onClick={handleRefresh}
             disabled={cooldown > 0 || pending}
-            className="relative w-10 h-10 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-300 hover:text-amber-500 hover:border-amber-500/50 transition-colors disabled:opacity-60"
+            className="relative w-11 h-11 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-300 hover:text-amber-500 hover:border-amber-500/50 transition-colors disabled:opacity-60"
             title={cooldown > 0 ? `冷卻 ${cooldown}s` : '重新整理'}
           >
             {cooldown > 0 ? (
@@ -137,7 +137,7 @@ export default function PlayerHomeClient({ initialStats, initialItems }: Props) 
               <RefreshCcw className={`w-4 h-4 ${pending ? 'animate-spin' : ''}`} />
             )}
           </button>
-          <Link href="/settings" className="w-10 h-10 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-300 hover:text-amber-500 hover:border-amber-500/50 transition-colors">
+          <Link href="/settings" className="w-11 h-11 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-300 hover:text-amber-500 hover:border-amber-500/50 transition-colors">
             <Settings className="w-4 h-4" />
           </Link>
         </div>

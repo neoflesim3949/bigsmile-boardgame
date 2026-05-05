@@ -10,6 +10,7 @@ import {
   type QuickActionRow,
   type QuickActionPayload,
 } from '@/app/actions/captain';
+import { useConfirm } from '@/components/shared/ConfirmProvider';
 
 interface ItemDef { id: string; name: string; icon: string }
 
@@ -23,6 +24,7 @@ export default function CaptainActionsClient({ stations, initialQuickActions, it
   const [list, setList] = useState<QuickActionRow[]>(initialQuickActions);
   const [editing, setEditing] = useState<QuickActionRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+  const confirm = useConfirm();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -65,7 +67,7 @@ export default function CaptainActionsClient({ stations, initialQuickActions, it
                 </button>
                 <button
                   onClick={async () => {
-                    if (!confirm(`刪除快捷模組「${qa.label}」？`)) return;
+                    if (!(await confirm({ message: `刪除快捷模組「${qa.label}」？`, danger: true }))) return;
                     const r = await deleteQuickAction(qa.id);
                     if (r.ok) {
                       setList((arr) => arr.filter((x) => x.id !== qa.id));

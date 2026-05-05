@@ -30,6 +30,7 @@ const TX_TYPE_LABEL: Record<string, string> = {
   settings_update: '系統設定變更',
   final_scoring: '終局結算',
   danger_zone_reset: '危險操作重置',
+  round_tick: '系統推進回合',
 };
 
 interface Initial {

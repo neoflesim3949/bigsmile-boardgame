@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { ActionError, fail, ok, type ActionResult } from '@/lib/error';
 import { query, withTx } from '@/lib/db';
-import { assertNotDuringFinalScoring, assertNotTourMode, assertPlayerAlive, requireRole } from '@/lib/auth';
+import { assertNotFrozen, assertPlayerAlive, requireRole } from '@/lib/auth';
 import { getSetting } from '@/lib/settings';
 
 export interface StockMarketRow {
@@ -38,7 +38,24 @@ export async function getStockMarket(manual = false): Promise<ActionResult<{
 }>> {
   try {
     const session = await requireRole('player');
-    void manual; // 股市頁與 / 共用 cooldown 由 getMyStats 端處理；此 action 不另外節流
+
+    // 與 getMyStats 共用 last_manual_refresh_at 節流（CLAUDE.md §11 紅旗）
+    // 用 atomic UPDATE 防前端繞過：rowCount=0 = 冷卻中
+    if (manual) {
+      const cooldownStr = await getSetting('ManualRefreshCooldownSeconds');
+      const cooldown = Math.max(1, Number(cooldownStr) || 60);
+      const upd = await query(
+        `UPDATE "PlayerStats"
+         SET last_manual_refresh_at = now()
+         WHERE user_id = $1
+           AND (last_manual_refresh_at IS NULL OR now() - last_manual_refresh_at >= make_interval(secs => $2))
+         RETURNING user_id`,
+        [session.userId, cooldown],
+      );
+      if ((upd.rowCount ?? 0) === 0) {
+        throw new ActionError('REFRESH_RATE_LIMITED', `刷新冷卻中（${cooldown} 秒一次）`);
+      }
+    }
 
     const stocks = await query<StockMarketRow & { trend_old: number | null }>(
       `WITH old_prices AS (
@@ -122,8 +139,7 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
     const data = buySchema.parse(p);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
 
       // 不鎖 Stock row（CLAUDE.md §3.2 / §11）— 股價以呼叫當下價成交
       const stock = await client.query<{ current_price: number; code: string; name: string }>(
@@ -148,40 +164,54 @@ export async function buyStock(p: z.infer<typeof buySchema>): Promise<ActionResu
       assertPlayerAlive(me);
       if (me.money < cost) throw new ActionError('INSUFFICIENT_FUNDS', '金錢不足');
 
-      const newMoneyR = await client.query<{ money: number }>(
-        `UPDATE "PlayerStats" SET money = money - $2, updated_at = now() WHERE user_id = $1 RETURNING money`,
-        [session.userId, cost],
-      );
-
-      // upsert holding 並重算 avg_cost
-      const upd = await client.query<{ shares: number; avg_cost: number }>(
-        `INSERT INTO "StockHolding" (user_id, stock_id, shares, avg_cost)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id, stock_id) DO UPDATE SET
-           shares = "StockHolding".shares + EXCLUDED.shares,
-           avg_cost = ROUND(
-             ("StockHolding".shares * "StockHolding".avg_cost + EXCLUDED.shares * $4)
-             / NULLIF("StockHolding".shares + EXCLUDED.shares, 0)
-           ),
-           updated_at = now()
-         RETURNING shares, avg_cost`,
-        [session.userId, data.stockId, data.shares, price],
-      );
-
-      await client.query(
-        `INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
-         VALUES ($1, $1, 'stock_buy', $2)`,
-        [session.userId, JSON.stringify({
-          stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
-          shares: data.shares, price, cost,
-        })],
+      // 末三段合併成單一 CTE：UPDATE PlayerStats + UPSERT StockHolding + INSERT Transaction
+      // 從 3 個 round-trip 降到 1 個。前面 SELECT FOR UPDATE 已驗錢與生死，所以 paid 必然產生 1 row。
+      //
+      // **正確性 invariants（code review 0505_1 N1）**：
+      // - `paid` 必為 1 row（前面 SELECT FOR UPDATE 過 + UPDATE 鎖住該玩家 row）
+      // - `holding` 用 `VALUES` 不從 paid SELECT — 但若 paid 0-row（理論上不會），最後
+      //   `SELECT FROM paid, holding` CROSS JOIN 會回 0 row → JS `r.rows[0]` undefined →
+      //   throw → ROLLBACK 整 tx 含 holding 寫入 → 不留髒資料
+      // - `tx` clause 顯式 `SELECT FROM paid` gate，paid 0-row 時不寫 Transaction
+      // - 不貿然把 holding 改 `INSERT ... SELECT ... FROM paid` 因 ON CONFLICT 對 SELECT-source
+      //   cardinality 處理較複雜（需 DO UPDATE SET 引用 EXCLUDED 而非 source row）
+      const r = await client.query<{ new_money: number; shares: number; avg_cost: number }>(
+        `WITH paid AS (
+           UPDATE "PlayerStats" SET money = money - $2, updated_at = now()
+           WHERE user_id = $1 RETURNING money
+         ), holding AS (
+           INSERT INTO "StockHolding" (user_id, stock_id, shares, avg_cost)
+           VALUES ($1, $3, $4, $5)
+           ON CONFLICT (user_id, stock_id) DO UPDATE SET
+             shares = "StockHolding".shares + EXCLUDED.shares,
+             avg_cost = ROUND(
+               ("StockHolding".shares * "StockHolding".avg_cost + EXCLUDED.shares * $5)
+               / NULLIF("StockHolding".shares + EXCLUDED.shares, 0)
+             ),
+             updated_at = now()
+           RETURNING shares, avg_cost
+         ), tx AS (
+           -- 顯式 gate 在 paid 上：若 paid 0-row 則 Transaction 也不寫
+           -- code review 0505 M1，與 simulator (load-test.ts) 寫法對齊
+           INSERT INTO "Transaction" (user_id, actor_user_id, tx_type, payload)
+           SELECT $1, $1, 'stock_buy', $6::jsonb FROM paid
+         )
+         SELECT paid.money AS new_money, holding.shares, holding.avg_cost
+         FROM paid, holding`,
+        [
+          session.userId, cost, data.stockId, data.shares, price,
+          JSON.stringify({
+            stock_id: data.stockId, stock_code: stockCode, stock_name: stockName,
+            shares: data.shares, price, cost,
+          }),
+        ],
       );
 
       return {
         shares_bought: data.shares,
-        new_money: newMoneyR.rows[0].money,
-        new_shares: upd.rows[0].shares,
-        avg_cost: upd.rows[0].avg_cost,
+        new_money: r.rows[0].new_money,
+        new_shares: r.rows[0].shares,
+        avg_cost: r.rows[0].avg_cost,
       };
     });
 
@@ -204,8 +234,7 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
     const data = sellSchema.parse(p);
 
     const result = await withTx(async (client) => {
-      await assertNotDuringFinalScoring(client);
-      await assertNotTourMode(client);
+      await assertNotFrozen(client);
 
       const stock = await client.query<{ current_price: number; is_sellable: boolean; code: string; name: string }>(
         `SELECT current_price, is_sellable, code, name FROM "Stock" WHERE id = $1`,
@@ -237,7 +266,7 @@ export async function sellStock(p: z.infer<typeof sellSchema>): Promise<ActionRe
       const profit = (price - me.avg_cost) * data.shares;
       // 基礎福分扣分規則：blessing_penalty = round(profit / divisor)；賠錢不扣
       // divisor 由 AppSettings.StockSellBlessingPenaltyDivisor 控制（預設 10000 = 每 10K 獲利扣 1 福分）
-      const divisorStr = await getSetting('StockSellBlessingPenaltyDivisor');
+      const divisorStr = await getSetting('StockSellBlessingPenaltyDivisor', client);
       const divisor = Math.max(1, Number(divisorStr) || 10000);
       const blessingPenalty = profit > 0 ? Math.round(profit / divisor) : 0;
 
