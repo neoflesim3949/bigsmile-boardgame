@@ -40,7 +40,7 @@ async function decode(token: string): Promise<Session | null> {
   }
 }
 
-const PUBLIC_PATHS = ['/login', '/_next', '/favicon.ico', '/api/health'];
+const PUBLIC_PATHS = ['/login', '/_next', '/favicon.ico', '/api/health', '/api/loadtest-login'];
 const DISPLAY_PREFIX = '/display/';
 // 全 role 共用路由（player + captain + admin 都可訪問）
 const UNIVERSAL_AUTHED_PATHS = ['/settings'];
