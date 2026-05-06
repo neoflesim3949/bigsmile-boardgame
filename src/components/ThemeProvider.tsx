@@ -8,7 +8,7 @@ import { usePathname } from 'next/navigation';
  * 這些頁面有自己的視覺需求（後台高密度資訊、看板大屏遠距），
  * 不應跟著玩家端 ShowAllStats / 字級偏好飄移。
  */
-const FORCE_DARK_PREFIXES = ['/admin', '/display'];
+const FORCE_DARK_PREFIXES = ['/admin', '/display', '/compare'];
 
 /**
  * ThemeProvider — 在 client 端讀取 localStorage 偏好並套用到 <html>。
