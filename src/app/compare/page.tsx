@@ -1,4 +1,7 @@
 import type { Metadata } from 'next';
+import { Fragment } from 'react';
+import { listCompareComments, type CompareCommentRow } from '@/app/actions/compare';
+import CommentBox from './CommentBox';
 
 export const metadata: Metadata = {
   title: 'Neo V2 vs 體系版（Bigsmile Unity）功能比對',
@@ -6,12 +9,16 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+export const dynamic = 'force-dynamic';
+
 /**
  * 公開比對頁（無需登入）。
  * 對應 docs/different_NeoV2&BigsmileUnity.md，做成類 PDF 視覺。
  * middleware.ts PUBLIC_PATHS 已放行 /compare；ThemeProvider 強制深色。
+ * 每個比對條目（1.1–4.10）尾端有公開留言區（CompareComment 表）。
  */
-export default function ComparePage() {
+export default async function ComparePage() {
+  const commentsByKey = await listCompareComments();
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* ===== Hero ===== */}
@@ -58,6 +65,8 @@ export default function ComparePage() {
           <Table
             headers={['#', '功能', 'Neo V2', '體系版', '差異 / 5/5 結論']}
             colWidths={['w-12', 'w-40', '', '', '']}
+            rowKeys={['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '1.9']}
+            commentsByKey={commentsByKey}
             rows={[
               ['1.1', <strong key="t">命格 / 角色</strong>, '抽卡命格池（多範本、可設比例 / quota）', '角色（不能抽卡，玩家直接選）', <Warn key="x">體系版 <strong>不能抽卡</strong>，只能選角色</Warn>],
               ['1.2', <strong key="t">掃碼加分</strong>, '關主掃 QR → 套快捷模組', '掃碼加分（可雙向）', <Ok key="x">達成相同效果</Ok>],
@@ -103,6 +112,8 @@ export default function ComparePage() {
           <Table
             headers={['#', '功能', 'Neo V2', '體系版', '差異 / 結論']}
             colWidths={['w-12', 'w-40', '', '', '']}
+            rowKeys={['2.1', '2.2', '2.3', '2.4']}
+            commentsByKey={commentsByKey}
             rows={[
               ['2.1', <strong key="t">快捷分數配置</strong>, <code key="x">/captain/actions</code>, '後台任務設定', <Ok key="x">達成相同效果</Ok>],
               ['2.2', <strong key="t">重生鍵</strong>,
@@ -133,6 +144,8 @@ export default function ComparePage() {
           <Table
             headers={['#', '功能', 'Neo V2', '體系版', '差異']}
             colWidths={['w-12', 'w-40', '', '', '']}
+            rowKeys={['3.1']}
+            commentsByKey={commentsByKey}
             rows={[
               ['3.1', <strong key="t">看板顯示</strong>,
                 <div key="x" className="space-y-1.5">
@@ -153,6 +166,8 @@ export default function ComparePage() {
           <Table
             headers={['#', '功能', 'Neo V2', '體系版', '差異 / 結論']}
             colWidths={['w-12', 'w-44', '', '', '']}
+            rowKeys={['4.1', '4.2', '4.3', '4.4', '4.5', '4.6', '4.7', '4.8', '4.9', '4.10']}
+            commentsByKey={commentsByKey}
             rows={[
               ['4.1', <strong key="t">回合及回合推進計算各項目數值影響</strong>,
                 'admin 手動推進、每回合 10 分鐘、一次推進觸發：套用股價腳本 + 強制平倉 + 業力影響 + 借款利息結算（多項數值同步計算）',
@@ -419,11 +434,15 @@ function Table({
   rows,
   colWidths,
   compact = false,
+  rowKeys,
+  commentsByKey,
 }: {
   headers: React.ReactNode[];
   rows: React.ReactNode[][];
   colWidths?: string[];
   compact?: boolean;
+  rowKeys?: string[];
+  commentsByKey?: Record<string, CompareCommentRow[]>;
 }) {
   const padCls = compact ? 'px-3 py-2' : 'px-3 py-3';
   return (
@@ -442,18 +461,29 @@ function Table({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, ri) => (
-            <tr
-              key={ri}
-              className={`border-b border-zinc-800/60 last:border-b-0 ${ri % 2 === 0 ? 'bg-zinc-900/30' : 'bg-zinc-900/10'}`}
-            >
-              {r.map((cell, ci) => (
-                <td key={ci} className={`${padCls} align-top text-zinc-200 leading-relaxed`}>
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((r, ri) => {
+            const k = rowKeys?.[ri];
+            return (
+              <Fragment key={ri}>
+                <tr
+                  className={`border-b border-zinc-800/60 ${k ? '' : 'last:border-b-0'} ${ri % 2 === 0 ? 'bg-zinc-900/30' : 'bg-zinc-900/10'}`}
+                >
+                  {r.map((cell, ci) => (
+                    <td key={ci} className={`${padCls} align-top text-zinc-200 leading-relaxed`}>
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+                {k && (
+                  <tr className="border-b border-zinc-800/60 last:border-b-0">
+                    <td colSpan={headers.length} className="p-0">
+                      <CommentBox itemKey={k} initial={commentsByKey?.[k] ?? []} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
