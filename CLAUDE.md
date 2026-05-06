@@ -389,6 +389,25 @@ app/
 - 第一輪：「寫這個 server action」
 - 第二輪：「以 N+1 視角審視，列出每個 DB 查詢實際會跑的次數」
 
+### 10.5 Code review 必先讀完整 `docs/`（CRITICAL）
+
+**做 code review 前一律先讀完 `docs/` 下所有檔案再下判斷**。`CLAUDE.md` / `BOARD_GAME_V2.md` / `ARCH.md` 只涵蓋「鐵則 + 規格 + 架構」，但歷次 code review 結論、效能壓測數據、活動現場 runbook、跨版本差異、已知無害錯誤、備援方案等決策脈絡分散在 `docs/` 其他檔案：
+
+| 檔案 | 為何 review 時要看 |
+|------|-------------------|
+| `Possible_errors_0505.md` | 已知殘留 bug 評估 + smoke checklist — 別把 review 成果重複指出已記錄的 |
+| `code_review_fix_plan_0505.md` / `code_review_fix_results_0505.md` | 上一輪 review 已修 / 不修的決議 — 避免推翻定案 |
+| `event_runbook_0506.md` | 活動現場 SOP — 改動是否破壞 runbook 假設 |
+| `supabase_error_log.md` | 已歸類的「無害」DB 錯誤 — 別誤報 |
+| `different_NeoV2&BigsmileUnity.md` | 跨版本差異與 5/5 會議結論 — 避免提議「補上體系版有但 Neo 沒做」的功能（已決議不做）|
+| `perf_round_trip_0505.md` / `N+1_report.md` | 效能基準與已套用的優化 — 避免重複建議 |
+| `safety_report.md` | 安全相關 review 結論 |
+| `sol_0507.md` 等 sol_*.md | 架構決策（如備援方案）— 避免推翻已決定的取向 |
+
+**規則**：任何 code review（無論是 PR、`/review`、user 直接要求審）開始前都先把 `docs/` 整遍 `ls` 並讀過再做判斷。漏讀任何一份都可能導致 review 結論跟既有決策衝突。
+
+不確定哪份相關時，**全讀**比「猜哪份相關」便宜。
+
 ---
 
 ## 11. 紅旗清單（PR review 必查）
