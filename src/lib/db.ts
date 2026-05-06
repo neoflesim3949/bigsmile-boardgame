@@ -57,19 +57,52 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   return getPool().query<T>(sql, params as never[]);
 }
 
+/** PG SQLState `40P01` = deadlock_detected；偵測 message 也作備援（不同 driver 版本可能用不同形式）*/
+function isDeadlockError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; message?: unknown };
+  if (e.code === '40P01') return true;
+  if (typeof e.message === 'string' && /deadlock detected/i.test(e.message)) return true;
+  return false;
+}
+
+const DEADLOCK_MAX_RETRIES = 2;
+
+/**
+ * pg 顯式交易包裝。
+ *
+ * **Deadlock auto-retry（CLAUDE.md §11）**：偵測到 PG 主動 abort（SQLState 40P01）→ 等 50ms 後 retry，
+ * 最多 2 次（總共 3 次嘗試）。每次 retry 換新 client、新 BEGIN/COMMIT。
+ *
+ * 為什麼需要：實測 mixed test 「兩個 admin 並發推進」會撞 karma_band CTE 的 row lock 順序差。
+ * 真實 production 不會發生（tickRound 30s 節流硬性序列化），但環境差異 / 網路抖動 / 其他 backend
+ * 可能讓邊角 deadlock 偶發出現。retry 是廉價保險。
+ *
+ * 不重試其他錯誤（INSUFFICIENT_FUNDS / NOT_FOUND / ActionError 等業務錯誤直接 throw 給 caller）。
+ */
 export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= DEADLOCK_MAX_RETRIES; attempt++) {
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      client.release();
+      return result;
+    } catch (err) {
+      lastErr = err;
+      try { await client.query('ROLLBACK'); } catch { /* connection 已斷則 rollback 也會失敗 */ }
+      client.release();
+      if (attempt < DEADLOCK_MAX_RETRIES && isDeadlockError(err)) {
+        // 等 50ms 讓另一邊的 tx 完成或 timeout，避免立刻又撞同一個 lock 序
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        continue;
+      }
+      throw err;
+    }
   }
+  throw lastErr;
 }
 
 export type { PoolClient };

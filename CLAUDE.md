@@ -67,6 +67,7 @@
   - 玩家互轉、股票買賣、套用快捷模組、換匯、發放道具
 - 多 row 鎖：固定 `user_id` 升序排序避免死鎖
 - **不鎖 `Stock` row**：股價以呼叫當下 `current_price` 成交（避免買賣序列化）
+- **`withTx` 內建 deadlock auto-retry**：偵測到 PG SQLState `40P01` 自動 ROLLBACK + 換 client + 等 50ms 重試，最多 2 次。對抗環境差異 / 並發抖動造成的偶發 deadlock，業務錯誤（INSUFFICIENT_FUNDS 等）不重試
 - **tx 內取 / 寫 setting 一律傳 `client`**：`getSetting(key, client)` / `getSettings(keys, client)` / `setSetting(key, value, actor, client)`。**禁用** standalone — 否則會走獨立連線占用第 2 個 pool slot，500 並發雙倍消耗 pool（pool=10 production 等於 10% 直接浪費）
 - **凍結態檢查用合併 helper**：玩家寫入 action 第一行用 `assertNotFrozen(client)` 取代 `assertNotDuringFinalScoring + assertNotTourMode`（從 2 個 round-trip 降到 1）
 - **多表寫入合併 CTE**：UPDATE PlayerStats + UPSERT StockHolding + INSERT Transaction 等同一 tx 內的多次 row 寫入應合併成單一 CTE，從 3 個 round-trip 降到 1（範例見 [stock.ts buyStock](src/app/actions/stock.ts)）
