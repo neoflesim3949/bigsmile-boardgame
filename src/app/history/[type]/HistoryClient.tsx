@@ -1,0 +1,254 @@
+'use client';
+
+import Link from 'next/link';
+import { ArrowLeft, Wallet, Heart, Sparkles, Scale } from 'lucide-react';
+import type { HistoryType, HistoryEntry } from '@/app/actions/player';
+
+const TITLE: Record<HistoryType, { label: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
+  money: { label: '金錢', icon: Wallet, color: 'text-amber-400' },
+  health: { label: '健康', icon: Heart, color: 'text-rose-400' },
+  blessing: { label: '福分', icon: Sparkles, color: 'text-teal-400' },
+  karma: { label: '業力', icon: Scale, color: 'text-purple-400' },
+};
+
+const TX_TYPE_LABEL: Record<string, string> = {
+  destiny_draw: '抽取命格',
+  rebirth: '重生',
+  transfer: '轉帳',
+  exchange: '換匯',
+  bank_borrow: '銀行借款',
+  bank_repay: '銀行還款',
+  bank_interest: '銀行利息結算',
+  stock_buy: '買進股票',
+  stock_sell: '賣出股票',
+  quick_action: '關主套用快捷',
+  forced_liquidation: '強制平倉',
+  karma_band_effect: '業力影響',
+  captain_stock_sell_mult: '關主代售（加乘）',
+  item_grant: '取得道具',
+  account_update: '帳號變更',
+  settings_update: '系統設定變更',
+  final_scoring: '終局結算',
+  danger_zone_reset: '危險操作重置',
+  round_tick: '系統推進回合',
+};
+
+interface Initial {
+  entries: HistoryEntry[];
+  current_value: number;
+  show_all_stats: boolean;
+  scoring_done: boolean;
+}
+
+function s(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+function n(v: unknown): number | null {
+  return typeof v === 'number' ? v : null;
+}
+
+/** 把 payload 細節渲染成一句人類可讀的描述。回傳 null 代表沒有額外細節要顯示。 */
+function describe(txType: string, payload: Record<string, unknown>): string | null {
+  switch (txType) {
+    case 'destiny_draw': {
+      const dn = s(payload.destiny_name);
+      return dn ? `抽取命格（${dn}）` : null;
+    }
+    case 'quick_action': {
+      const station = s(payload.station_name);
+      const label = s(payload.quick_action_label);
+      const itemName = s(payload.granted_item_name);
+      const head = station && label
+        ? `${station} 關 關主套用 ${label}`
+        : label
+          ? `關主套用 ${label}`
+          : null;
+      const tail = itemName ? `（含發放道具：${itemName}）` : '';
+      return head ? head + tail : null;
+    }
+    case 'stock_buy': {
+      const code = s(payload.stock_code);
+      const name = s(payload.stock_name);
+      const shares = n(payload.shares);
+      const price = n(payload.price);
+      const cost = n(payload.cost);
+      if (shares == null || price == null) return null;
+      const left = code && name ? `${code} ${name}` : code || name || '股票';
+      const costStr = cost != null ? `共 $${cost.toLocaleString()}` : '';
+      return `買進 ${left} ×${shares} @${price.toLocaleString()} ${costStr}`.trim();
+    }
+    case 'stock_sell': {
+      const code = s(payload.stock_code);
+      const name = s(payload.stock_name);
+      const shares = n(payload.shares);
+      const price = n(payload.price);
+      const proceeds = n(payload.proceeds);
+      const profit = n(payload.profit);
+      if (shares == null || price == null) return null;
+      const left = code && name ? `${code} ${name}` : code || name || '股票';
+      const profitStr = profit != null
+        ? `（${profit >= 0 ? '利潤 +' : '虧損 '}${profit.toLocaleString()}）`
+        : '';
+      const proceedsStr = proceeds != null ? `共 $${proceeds.toLocaleString()}` : '';
+      return `賣出 ${left} ×${shares} @${price.toLocaleString()} ${proceedsStr}${profitStr}`.trim();
+    }
+    case 'captain_stock_sell_mult': {
+      const code = s(payload.stock_code);
+      const name = s(payload.stock_name);
+      const shares = n(payload.shares);
+      const total = n(payload.total_money_gain);
+      const bonus = n(payload.bonus);
+      const multLabel = s(payload.multiplier_label);
+      const station = s(payload.station_name);
+      if (shares == null) return null;
+      const left = code && name ? `${code} ${name}` : code || name || '股票';
+      const tag = multLabel ? `「${multLabel}」` : '';
+      const where = station ? `${station} 關 ` : '';
+      const totalStr = total != null ? `共 +$${total.toLocaleString()}` : '';
+      const bonusStr = bonus != null && bonus > 0 ? `（含加成 +$${bonus.toLocaleString()}）` : '';
+      return `${where}關主代售 ${left} ×${shares} ${tag} ${totalStr}${bonusStr}`.trim();
+    }
+    case 'transfer': {
+      const counterparty = s(payload.counterparty_name);
+      const amount = n(payload.amount);
+      const fee = n(payload.fee);
+      const note = s(payload.note);
+      const noteStr = note ? `（${note}）` : '';
+      const amtStr = amount != null ? ` $${amount.toLocaleString()}` : '';
+      const feeStr = fee != null && fee > 0 ? `（手續費 $${fee.toLocaleString()}）` : '';
+      if (payload.direction === 'out') {
+        return counterparty
+          ? `轉出${amtStr} 給 ${counterparty}${feeStr}${noteStr}`
+          : `轉出${amtStr}${feeStr}${noteStr}`;
+      }
+      if (payload.direction === 'in') {
+        return counterparty
+          ? `收到 ${counterparty} 轉入${amtStr}${noteStr}`
+          : `收到轉入${amtStr}${noteStr}`;
+      }
+      // 舊版 row（沒寫 direction）→ 顯示原始 to user_id（盡力而為）
+      const oldTo = s(payload.to);
+      return oldTo ? `轉帳（→ ${oldTo}）` : null;
+    }
+    case 'forced_liquidation': {
+      const event = s(payload.event_text) || '系統事件';
+      const code = s(payload.stock_code);
+      const name = s(payload.stock_name);
+      const sold = n(payload.shares_sold);
+      if (sold == null) return null;
+      const stock = code && name ? `${code} ${name}` : (code || name || '股票');
+      return `因「${event}」股票「${stock}」被強制售出 ×${sold} @ $0`;
+    }
+    case 'karma_band_effect': {
+      const band = s(payload.band_label);
+      const round = n(payload.round);
+      if (!band) return null;
+      return round != null ? `第 ${round} 回合處於「${band}」狀態` : `處於「${band}」狀態`;
+    }
+    case 'exchange': {
+      const label = s(payload.option_label);
+      const units = n(payload.units);
+      // 新版 schema 用 money_gain；舊版 row 可能是 money_gained → 兩邊兼容
+      const moneyGain = n(payload.money_gain) ?? n(payload.money_gained);
+      const labelStr = label ? `${label} ` : '';
+      if (units != null && moneyGain != null) {
+        return `兌換 ${labelStr}×${units} 單位 → +$${moneyGain.toLocaleString()}`;
+      }
+      if (units != null) return `兌換 ${labelStr}×${units} 單位`;
+      return null;
+    }
+    case 'bank_borrow': {
+      // 合約化 schema 後改用 principal；保留 amount fallback 兼容舊紀錄
+      const amt = n(payload.principal) ?? n(payload.amount);
+      const label = s(payload.loan_label);
+      return amt != null
+        ? (label ? `借入 ${label} $${amt.toLocaleString()}` : `借入 $${amt.toLocaleString()}`)
+        : null;
+    }
+    case 'bank_repay': {
+      const amt = n(payload.amount);
+      return amt != null ? `償還 $${amt.toLocaleString()}` : null;
+    }
+    case 'rebirth': {
+      const stocks = n(payload.cleared_stocks);
+      const loans = n(payload.cleared_loans);
+      const items = n(payload.cleared_items);
+      const parts = [];
+      if (stocks) parts.push(`${stocks} 股`);
+      if (loans) parts.push(`${loans} 借貸`);
+      if (items) parts.push(`${items} 道具`);
+      return parts.length > 0 ? `重生（清 ${parts.join('、')}）` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+export default function HistoryClient({ type, initial }: { type: HistoryType; initial: Initial }) {
+  const meta = TITLE[type];
+  const Icon = meta.icon;
+
+  return (
+    <div className="min-h-screen page-bg p-4 pb-12">
+      <header className="flex items-center gap-3 mb-6">
+        <Link href="/" className="w-9 h-9 rounded-full bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-zinc-300">
+          <ArrowLeft className="w-4 h-4" />
+        </Link>
+        <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+          <Icon className={`w-5 h-5 ${meta.color}`} /> {meta.label}明細
+        </h1>
+      </header>
+
+      <div className="glass-panel rounded-2xl p-5 mb-4">
+        <p className="text-xs text-zinc-500">當前數值</p>
+        <p className={`text-4xl font-bold ${meta.color}`}>
+          {initial.current_value.toLocaleString()}
+          {type === 'health' && <span className="text-base text-zinc-500 ml-1">/100</span>}
+        </p>
+      </div>
+
+      {!initial.show_all_stats && initial.scoring_done && (type === 'blessing' || type === 'karma') && (
+        <div className="bg-amber-950/30 border border-amber-900/60 text-amber-300 rounded-lg p-3 mb-4 text-sm">
+          活動已結束，本明細已解鎖供你回顧大起大落。
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {initial.entries.length === 0 ? (
+          <div className="glass-panel rounded-2xl p-8 text-center text-zinc-500">尚無交易紀錄</div>
+        ) : (
+          initial.entries
+            .filter((e) => type === 'money' ? true : (e.delta !== 0 || e.delta === null))
+            .map((e) => {
+              const txLabel = TX_TYPE_LABEL[e.tx_type] ?? e.tx_type;
+              const detail = describe(e.tx_type, e.payload);
+              const showDelta = e.delta !== null;
+              const positive = (e.delta ?? 0) >= 0;
+              return (
+                <div key={e.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 flex justify-between items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-200">
+                      {detail ?? txLabel}
+                    </p>
+                    {detail && (
+                      <p className="text-[0.6875rem] text-zinc-500 mt-0.5">{txLabel}</p>
+                    )}
+                    <p className="text-xs text-zinc-600 mt-0.5">{new Date(e.created_at).toLocaleString()}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {showDelta ? (
+                      <span className={`font-mono text-lg font-bold ${positive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {positive ? '+' : ''}{e.delta!.toLocaleString()}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-500 text-xs">—</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+        )}
+      </div>
+    </div>
+  );
+}
