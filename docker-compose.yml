@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bigsmile_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bigsmile
+      POSTGRES_PASSWORD: bigsmile_dev
+      POSTGRES_DB: bigsmile
+    ports:
+      - "5432:5432"
+    volumes:
+      - bigsmile_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bigsmile -d bigsmile"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  bigsmile_pg_data:
