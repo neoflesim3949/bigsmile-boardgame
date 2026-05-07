@@ -13,7 +13,8 @@ type LoginResult = ActionResult<{ role: Role; redirectTo: string }> | null;
  * Login 自動重試 — exponential backoff + full jitter（規避 PgBouncer Pooler 200 上限）。
  *
  * 規則：
- * - 只重試 `INTERNAL_ERROR`（fail() 對未知 throw 的 fallback 包裝，含 pg EMAXCONN / TIMEOUT）
+ * - 重試 `INTERNAL_ERROR`（fail() 對未知 throw 的 fallback 包裝、含 pg EMAXCONN）
+ * - 重試 `TIMEOUT`（db.ts 三道 timeout 保險絲被觸發、problem_0507.md §2/§4）
  * - **不**重試 LOGIN_FAILED（密碼錯）/ LOGIN_LOCKED（鎖帳）/ INVALID_INPUT（form 錯）
  * - 最多 3 次 retry，base 500ms × 2^(attempt-1)，full jitter [0, 2 × base]
  *   - attempt 1: wait 0~1000ms
@@ -28,11 +29,13 @@ type LoginResult = ActionResult<{ role: Role; redirectTo: string }> | null;
  *
  * 對玩家：UI 仍顯示「登入中…」全程；極端尖峰時等待時間略拉長但能進。
  */
+const RETRYABLE_CODES = new Set(['INTERNAL_ERROR', 'TIMEOUT']);
+
 async function loginAction(_prev: LoginResult, formData: FormData): Promise<LoginResult> {
   const MAX_RETRIES = 3;
   let last: LoginResult = await login(_prev, formData);
   if (last.ok) return last;
-  if (last.error?.code !== 'INTERNAL_ERROR') return last;
+  if (!RETRYABLE_CODES.has(last.error?.code ?? '')) return last;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const baseMs = 500 * Math.pow(2, attempt - 1);
@@ -40,7 +43,7 @@ async function loginAction(_prev: LoginResult, formData: FormData): Promise<Logi
     await new Promise((resolve) => setTimeout(resolve, waitMs));
     last = await login(_prev, formData);
     if (last.ok) return last;
-    if (last.error?.code !== 'INTERNAL_ERROR') return last;
+    if (!RETRYABLE_CODES.has(last.error?.code ?? '')) return last;
   }
   return last;
 }
@@ -99,7 +102,7 @@ export default function LoginForm() {
         <div className="flex items-start gap-2 text-rose-400 text-sm bg-rose-950/30 border border-rose-900/60 rounded-lg px-3 py-2">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>
-            {state.error?.code === 'INTERNAL_ERROR'
+            {state.error?.code === 'INTERNAL_ERROR' || state.error?.code === 'TIMEOUT'
               // 自動 retry 3 次仍失敗 → 給用戶明確指引（人潮多、再點一次必中）
               ? '目前登入人潮較多，請等 3 秒後再點一次「登入」即可'
               : (state.error?.message ?? '登入失敗')}

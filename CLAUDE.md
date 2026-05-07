@@ -68,6 +68,8 @@
 - 多 row 鎖：固定 `user_id` 升序排序避免死鎖
 - **不鎖 `Stock` row**：股價以呼叫當下 `current_price` 成交（避免買賣序列化）
 - **`withTx` 內建 deadlock auto-retry**：偵測到 PG SQLState `40P01` 自動 ROLLBACK + 換 client + 等 50ms 重試，最多 2 次。對抗環境差異 / 並發抖動造成的偶發 deadlock，業務錯誤（INSUFFICIENT_FUNDS 等）不重試
+- **pg pool 三道 timeout 保險絲**（[problem_0507.md](docs/problem_0507.md) §2/§4）：`connectionTimeoutMillis: 5s`（拿不到連線 5s 放棄）+ `query_timeout: 30s`（client 端）+ `statement_timeout: 30s`（PG 端）。**避免 1 個壞 query 占連線永久、後續 acquire 也 hang**。修改 pool config 時不可移除這三項
+- **TIMEOUT 錯誤碼**（[lib/error.ts](src/lib/error.ts)）：`fail()` 偵測上述三道 timeout（SQLState `57014` / pg client / pg pool 訊息）→ 回 `TIMEOUT` code + 訊息「系統忙線，請 5 秒後再試」。**禁止**把 timeout 混進 `INTERNAL_ERROR`（玩家分不清楚要不要重試 / 是否雙重提交）。LoginForm 的 retry 白名單同時收 `INTERNAL_ERROR` + `TIMEOUT`
 - **tx 內取 / 寫 setting 一律傳 `client`**：`getSetting(key, client)` / `getSettings(keys, client)` / `setSetting(key, value, actor, client)`。**禁用** standalone — 否則會走獨立連線占用第 2 個 pool slot，500 並發雙倍消耗 pool（pool=10 production 等於 10% 直接浪費）
 - **凍結態檢查用合併 helper**：玩家寫入 action 第一行用 `assertNotFrozen(client)` 取代 `assertNotDuringFinalScoring + assertNotTourMode`（從 2 個 round-trip 降到 1）
 - **多表寫入合併 CTE**：UPDATE PlayerStats + UPSERT StockHolding + INSERT Transaction 等同一 tx 內的多次 row 寫入應合併成單一 CTE，從 3 個 round-trip 降到 1（範例見 [stock.ts buyStock](src/app/actions/stock.ts)）
@@ -197,12 +199,12 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - 「開啟活動看板」link → `/admin/events`（去發 display token）
 
 **B. 3 控制台**
-- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（兩 tx + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）。前置條件：`BoardGameEnabled='true'` && 終局未觸發；不符直接 FORBIDDEN。第 1 回合推進時 UPSERT `TourMode='false'`。三個控制面板等高 `xl:h-[420px]`，推進歷史內部 `h-32` fixed scroll，內容超過走滾動不撐高 panel
+- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（**單一 tx** + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）。前置條件：`BoardGameEnabled='true'` && 終局未觸發；不符直接 FORBIDDEN。第 1 回合推進時 UPSERT `TourMode='false'`。**單一 tx 涵蓋**：股價更新 + 回合 +1 + 強制平倉 + 業力影響 + 借款利息結算 + recompute final_score（[problem_0507.md](docs/problem_0507.md) §6.2 — 原本拆兩個 tx 會留半完成狀態，已合併）。三個控制面板等高 `xl:h-[420px]`，推進歷史內部 `h-32` fixed scroll，內容超過走滾動不撐高 panel
 - **股票腳本值 = 0 的語意**：`StockRoundScript.change_value`（`/admin/stocks` 回合腳本總表）允許設 0：
   - `fixed = 0`：該回合股價直接歸零（暴跌劇情）。後端 `buyStock` 加 guard 拒絕 `price <= 0` 的買單；前端股市買進按鈕顯示「停止交易」disabled
   - `percent = 0`：該回合股價鎖定**不變動**（與「無腳本走 ±5% 隨機」不同）
   - 前端 admin 編輯 cell：值為 0 **不該觸發 cell 刪除**，只有空值或非數字才刪
-- **強制平倉事件**：`StockRoundEvent.force_liquidation_ratio`（0–100）每回合可設一個全域比例。`tickRound` Tx1 內在股價更新後執行：
+- **強制平倉事件**：`StockRoundEvent.force_liquidation_ratio`（0–100）每回合可設一個全域比例。`tickRound` 單一 tx 內、股價更新後執行：
   - 對所有 `StockHolding`：`shares_to_sell = FLOOR(shares × ratio / 100)`
   - 賣價固定 **$0**（不依當前 current_price，事件性懲罰），玩家完全沒拿回錢
   - `avg_cost` **不變動**（剩下的股維持原均價）
@@ -220,7 +222,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
   - 寫 `Transaction tx_type='captain_stock_sell_mult'`，actor 是關主 user_id
   - **同樣的「1K 獲利扣 0.1 福分」基礎規則也套用在玩家 `/stock` 自助 sellStock**（不是只有關主代售才扣）；profit ≤ 0 同樣不扣
   - **掃碼或手動輸入 ID 都可用**（不像重生鍵限定 QR）；後端在 captainSellStockWithMultiplier 內驗 captain 屬於該 station 且 station 旗標開啟、multiplier 屬於該 station 且啟用
-- **業力影響（KarmaBand）**：`/admin/settings` 命格範本下方的「業力影響」區管理。每筆 row = `{label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta, sort_order, is_active}`，`karma_min/max` 允許 NULL（不設下/上限）。`tickRound` Tx1 在強制平倉之後執行：
+- **業力影響（KarmaBand）**：`/admin/settings` 命格範本下方的「業力影響」區管理。每筆 row = `{label, karma_min, karma_max, money_delta, health_delta, blessing_delta, karma_delta, sort_order, is_active}`，`karma_min/max` 允許 NULL（不設下/上限）。`tickRound` 單一 tx 內、強制平倉之後執行：
   - 對 `health > 0 AND blessing > 0` 的玩家以 LATERAL JOIN 取對應 band（重疊以 `sort_order` 小者優先 LIMIT 1）
   - 跳過 4 項 delta 全 0 的 band（如「平凡」），避免污染 Transaction
   - cap 規則：`health = LEAST(100, GREATEST(0, ...))`、`money / blessing = GREATEST(0, ...)`、`karma` 不設上下限
@@ -231,7 +233,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - **換匯所即時權重控制**：`-50%` / `-20%` / `0%` / `+50%` / `+100%` / 自訂 6 鈕 → `setExchangeRateMultiplier`，倍率套在 `ExchangeOption.money_gain_per_unit` 上。**「自訂」用內建 modal**（不要用 `window.prompt` — mobile Safari / 部分桌面 Chrome 會靜默擋）。**前後端必須同時套用倍率且公式一致**：`listExchangeOptionsForPlayer` 與 `exchangeBlessing` 都用 `effective_per_unit = round(money_gain_per_unit × mult)`、`total = effective_per_unit × units`（先 round 再乘，避免「顯示 +200、實際 +199」的 rounding 爭議）。**禁止**只在後端套倍率不在前端 list 套，否則玩家看到的「將獲得」與實際入帳會不一致
 
 **C. 風雲榜**（前身為「財富排行榜」）
-- `final_score` **預存於 `PlayerStats.final_score`**（migration 0012），每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 由 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore` 自動重算。SQL 內以 `::float` cast 讀 AppSettings 算分（避免 PG 對 `int * float-text-param` 的 cast 推導失敗）。
+- `final_score` **預存於 `PlayerStats.final_score`**（migration 0012），每次 `tickRound` 單一 tx 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 由 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore` 自動重算。SQL 內以 `::float` cast 讀 AppSettings 算分（避免 PG 對 `int * float-text-param` 的 cast 推導失敗）。
 - 公式：`final_score = ROUND(money × W_m + blessing × W_b − karma × W_k)`
 - Admin 端 leaderboard 撈全部 active player（**不下 LIMIT**，依 `final_score DESC`）→ 前端分頁（**預設 20 / 可切 50 / 100**）+ 6 欄可點排序（金錢 / 福份 / 健康 / 業力 / 重生次數 / 最終分數）+ 命格 / 狀態 兩欄 pill badge 依 theme 套色
 - **rank 永遠依 `final_score` DESC 固定，不隨當前排序欄位變化**（V2 §8 名次固定原則）— 玩家身上的 rank 數字不論點哪個欄位排序都不會變
@@ -470,7 +472,7 @@ app/
 - [ ] 揭曉彈窗截圖**強制深色**（不論玩家當下主題）→ 違反規格。正確做法：**跟著當下主題**——讀 `document.documentElement.dataset.theme === 'light'` 決定 `toPng({ backgroundColor: ... })` 用 `#ffffff`（淺）或 `#18181b`（深）；玩家自己選什麼模式就下載什麼模式
 - [ ] 揭曉彈窗截圖只用 `<a download>` → iPhone Safari 體驗差（彈出「下載項目」要去檔案 app 找）。正確：先試 `navigator.canShare({ files: [file] })`，可用就 `navigator.share(...)` 開系統 share sheet（iOS 跳「儲存圖片」直接存相簿）；不支援的環境 fallback `<a download>`。`AbortError`（使用者取消）視為成功不報錯
 - [ ] 命格 / 狀態卡片設了 `show_all_stats` 條件 → 違反規格。兩張卡都「永遠顯示」；狀態 label 反映業力區間、不暗示福分值，與 ShowAllStats 無關（ShowAllStats 只擋具體數值的數字本身）
-- [ ] 排行榜算分搬回 JS 端（撈全部 → JS sort + slice）→ 違反現行設計。**現行設計：score 預存在 `PlayerStats.final_score`**，每次 `tickRound` Tx2 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 都會重算（見 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore`）。Leaderboard 查詢直接 `ORDER BY ps.final_score DESC LIMIT N`。**不要再下 LIMIT 但忘了 ORDER BY** — 那會隨機截掉高分玩家（已踩過坑）
+- [ ] 排行榜算分搬回 JS 端（撈全部 → JS sort + slice）→ 違反現行設計。**現行設計：score 預存在 `PlayerStats.final_score`**，每次 `tickRound` 單一 tx 結尾 / 改 `ScoreWeight*` / `triggerFinalScoring` / `rebirthPlayer` 都會重算（見 `lib/score.ts` 的 `recomputeAllPlayerScores` / `recomputePlayerScore`）。Leaderboard 查詢直接 `ORDER BY ps.final_score DESC LIMIT N`。**不要再下 LIMIT 但忘了 ORDER BY** — 那會隨機截掉高分玩家（已踩過坑）
 - [ ] `/display/board` 「展開最終榜單」按鈕在活動進行中也顯示 → 違反規格（按鈕**僅** `serverIsFinal === true` 時才出現，避免在公開看板讓觀眾 preview 終局結算未發生時的排名）
 - [ ] `/display/board` 常規模式仍渲染風雲榜 panel → 違反規格（`!isFinal` 時 panel **完全隱藏**，重點趨勢 + 行情總表 flex 自然填滿）
 - [ ] `/display/board` 終局風雲榜限制只顯示前 10 名 / 沒可見 scrollbar / 點擊 header 排序無效 → 違反規格。正確做法：(1) 撈全部、前端不 slice；(2) panel 套 `pointer-events-auto` 覆蓋 main 的 `pointer-events-none` 讓主持人可點排序 + 滾動；(3) 用 `.board-final-scroll` 顯示明顯的 amber scrollbar（不是 `.no-scrollbar`）；(4) header 副標寫「共 N 人」提示總人數

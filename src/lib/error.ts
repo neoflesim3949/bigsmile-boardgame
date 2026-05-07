@@ -13,6 +13,7 @@ export type ActionErrorCode =
   | 'TICK_RATE_LIMITED'
   | 'LOGIN_LOCKED'
   | 'LOGIN_FAILED'
+  | 'TIMEOUT'
   | 'INTERNAL_ERROR';
 
 export class ActionError extends Error {
@@ -106,6 +107,25 @@ function formatZodIssue(issue: ZodLikeIssue): string {
   return `${fieldLabel || '輸入'}：${issue.message ?? '格式錯誤'}`;
 }
 
+/**
+ * 偵測 db.ts 三道 timeout 保險絲拋出的錯誤（problem_0507.md §2/§4）：
+ *   - PG `statement_timeout` → SQLState `57014`
+ *   - pg client `query_timeout` → "Connection terminated due to query timeout"
+ *   - pg pool `connectionTimeoutMillis` → "timeout exceeded when trying to connect"
+ */
+function isTimeoutError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; message?: unknown };
+  if (e.code === '57014') return true;
+  if (typeof e.message === 'string') {
+    const msg = e.message;
+    if (/timeout exceeded when trying to connect/i.test(msg)) return true;
+    if (/query timeout|terminated due to query timeout/i.test(msg)) return true;
+    if (/canceling statement due to statement timeout/i.test(msg)) return true;
+  }
+  return false;
+}
+
 export function fail(err: unknown): ActionResult<never> {
   if (err instanceof ActionError) {
     return { ok: false, error: { code: err.code, message: err.message, meta: err.meta } };
@@ -119,6 +139,14 @@ export function fail(err: unknown): ActionResult<never> {
         message: issues.join('；'),
         meta: { issues: err.issues },
       },
+    };
+  }
+  // 三道 timeout 保險絲：給玩家友善訊息（不混在 INTERNAL_ERROR 裡）
+  if (isTimeoutError(err)) {
+    console.warn('[Timeout]', err);
+    return {
+      ok: false,
+      error: { code: 'TIMEOUT', message: '系統忙線，請 5 秒後再試' },
     };
   }
   console.error('[ActionError unexpected]', err);

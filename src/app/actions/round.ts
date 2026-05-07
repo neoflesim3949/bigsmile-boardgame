@@ -9,10 +9,12 @@ import { recomputeAllPlayerScores } from '@/lib/score';
 
 /**
  * tickRound：主持人按「下一回合」。
- * 拆兩個 pg tx（避免長 tx 阻塞玩家寫入）：
- *   Tx1：股價更新 + BoardConfig.current_round +=1 + last_tick_at = now()
- *   Tx2：批次結算所有 PlayerLoan 利息 + INSERT…SELECT 寫 Transaction
- * 30 秒節流：BoardConfig.last_tick_at 距今 < 30 秒則拒絕。
+ * **單一 pg tx**（problem_0507.md §6.2）：股價 + 回合 +1 + 強制平倉 + 業力影響 + 借款利息結算
+ * + 重算 final_score。原本拆兩 tx 是想縮短 lock window，但會留半完成狀態（tx1 commit + tx2 fail
+ * → 回合 +1 但利息沒扣、下次按又進下個回合）。改成單 tx 後一致性 100%，admin tick 鎖
+ * PlayerStats 行多 ~100ms × 12 ticks = 整場 ~1.2 秒（可接受）。
+ *
+ * 30 秒節流：BoardConfig.last_tick_at 距今 < 30 秒則拒絕（atomic SQL 防主持人連按）。
  */
 export async function tickRound(): Promise<
   ActionResult<{ round: number; players_settled: number }>
@@ -20,8 +22,9 @@ export async function tickRound(): Promise<
   try {
     const session = await requireRole('admin');
 
-    // ─── Tx 1：股價 + 回合計數（含 30 秒節流，原子 SQL 防誤點）───
-    const tx1 = await withTx(async (client) => {
+    // ─── 單一 tx：股價 + 回合計數 + 強制平倉 + 業力 + 利息結算 + 重算分數 ───
+    // 含 30 秒節流（原子 SQL 防主持人連按）
+    const result = await withTx(async (client) => {
       // 遊戲未開始 / 已結算 不允許推進回合
       const flagsR = await client.query<{ key: string; value: string }>(
         `SELECT key, value FROM "AppSettings" WHERE key = 'BoardGameEnabled'`,
@@ -237,11 +240,7 @@ export async function tickRound(): Promise<
         })],
       );
 
-      return newRound;
-    });
-
-    // ─── Tx 2：借款利息結算（按合約 balance/principal 比例）───
-    const tx2 = await withTx(async (client) => {
+      // ─── 借款利息結算（同 tx 內、原本是獨立 tx2、合併避免半完成狀態）───
       // 算法：每張未還清合約 → ROUND(base_interest * balance / principal) 個別利息
       //      → SUM by user_id 一次扣 PlayerStats.money / blessing
       //      → 每張合約寫一筆 'bank_interest' Transaction（含 loan_id 方便歷史追蹤）
@@ -289,15 +288,17 @@ export async function tickRound(): Promise<
          )
          SELECT DISTINCT user_id FROM updated_ps`,
       );
-      // 重算所有玩家 final_score（反映 Tx1 業力影響 / 強制平倉 + Tx2 利息結算後的最新狀態）
+
+      // 重算所有玩家 final_score（同 tx：反映業力 / 強制平倉 + 利息結算後的最新狀態）
       await recomputeAllPlayerScores(client);
-      return settled.rowCount ?? 0;
+
+      return { round: newRound, players_settled: settled.rowCount ?? 0 };
     });
 
     revalidatePath('/admin');
     revalidatePath('/admin/events');
     revalidatePath('/display/board');
-    return ok({ round: tx1, players_settled: tx2 });
+    return ok(result);
   } catch (err) {
     return fail(err);
   }
