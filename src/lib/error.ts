@@ -108,7 +108,7 @@ function formatZodIssue(issue: ZodLikeIssue): string {
 }
 
 /**
- * 偵測 db.ts 三道 timeout 保險絲拋出的錯誤（problem_0507.md §2/§4）：
+ * 偵測 db.ts 三道 timeout 保險絲拋出的錯誤（0507_problem.md §2/§4）：
  *   - PG `statement_timeout` → SQLState `57014`
  *   - pg client `query_timeout` → "Connection terminated due to query timeout"
  *   - pg pool `connectionTimeoutMillis` → "timeout exceeded when trying to connect"

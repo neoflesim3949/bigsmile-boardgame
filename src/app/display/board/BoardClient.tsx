@@ -44,7 +44,7 @@ export default function BoardClient({ initial, token }: Props) {
   useEffect(() => {
     let cancelled = false;
     const reload = async () => {
-      // problem_0507.md §6.1：包 try/catch 避免 60s fallback poll 失敗
+      // 0507_problem.md §6.1：包 try/catch 避免 60s fallback poll 失敗
       // 變 unhandled rejection（Supabase 暫不通時只記 warn、下次 60s 自動重試）
       try {
         const r = await getBoardData(token);

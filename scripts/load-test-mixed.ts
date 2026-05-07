@@ -8,7 +8,7 @@
  * - 主持人剛好按了下一回合 → 觸發強制平倉（Phase 4）+ 業力影響（Phase 5）
  * 都在同一秒發生
  *
- * 結果寫入 docs/testspeed_0504_1.md
+ * 結果寫入 docs/0504_testspeed_1.md
  */
 
 import { config as loadEnv } from 'dotenv';
@@ -392,7 +392,7 @@ async function main() {
 
     // 寫報告
     const md = renderReport({ wallMs, totalOk, totalFail, stats, dist, isPgBouncer, url, mode: MODE, totalWorkers: phases.length });
-    const dest = join(process.cwd(), 'docs', 'testspeed_0504_1.md');
+    const dest = join(process.cwd(), 'docs', '0504_testspeed_1.md');
     if (APPEND) {
       const { readFileSync, existsSync } = await import('node:fs');
       const existing = existsSync(dest) ? readFileSync(dest, 'utf-8') : '';

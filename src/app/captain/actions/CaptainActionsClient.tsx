@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { ArrowLeft, Plus, Trash2, X, Edit2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   upsertQuickAction,
@@ -11,6 +11,7 @@ import {
   type QuickActionPayload,
 } from '@/app/actions/captain';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface ItemDef { id: string; name: string; icon: string }
 
@@ -25,6 +26,7 @@ export default function CaptainActionsClient({ stations, initialQuickActions, it
   const [editing, setEditing] = useState<QuickActionRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -68,11 +70,11 @@ export default function CaptainActionsClient({ stations, initialQuickActions, it
                 <button
                   onClick={async () => {
                     if (!(await confirm({ message: `刪除快捷模組「${qa.label}」？`, danger: true }))) return;
-                    const r = await deleteQuickAction(qa.id);
-                    if (r.ok) {
+                    const r = await run(() => deleteQuickAction(qa.id));
+                    if (r?.ok) {
                       setList((arr) => arr.filter((x) => x.id !== qa.id));
                       showToast(true, '已刪除');
-                    } else showToast(false, r.error?.message ?? '');
+                    }
                   }}
                   className="p-1.5 text-zinc-400 hover:text-rose-400"
                 >
@@ -158,33 +160,30 @@ function QuickActionEditor({
   const [reqItem, setReqItem] = useState<string>(target?.req_item_id ?? '');
   const [playerMax, setPlayerMax] = useState(target?.player_max_uses?.toString() ?? '');
   const [globalMax, setGlobalMax] = useState(target?.global_max_uses?.toString() ?? '');
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: QuickActionPayload = {
-        id: target?.id,
-        station_id: stationId,
-        label,
-        delta_money: Number(dm) || 0,
-        delta_health: Number(dh) || 0,
-        delta_blessing: Number(db) || 0,
-        delta_karma: Number(dk) || 0,
-        bound_item_id: boundItem || null,
-        req_money: reqMoney ? Number(reqMoney) : null,
-        req_health: reqHealth ? Number(reqHealth) : null,
-        req_blessing: reqBlessing ? Number(reqBlessing) : null,
-        req_karma: reqKarma ? Number(reqKarma) : null,
-        req_item_id: reqItem || null,
-        player_max_uses: playerMax ? Number(playerMax) : null,
-        global_max_uses: globalMax ? Number(globalMax) : null,
-      };
-      const r = await upsertQuickAction(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: QuickActionPayload = {
+      id: target?.id,
+      station_id: stationId,
+      label,
+      delta_money: Number(dm) || 0,
+      delta_health: Number(dh) || 0,
+      delta_blessing: Number(db) || 0,
+      delta_karma: Number(dk) || 0,
+      bound_item_id: boundItem || null,
+      req_money: reqMoney ? Number(reqMoney) : null,
+      req_health: reqHealth ? Number(reqHealth) : null,
+      req_blessing: reqBlessing ? Number(reqBlessing) : null,
+      req_karma: reqKarma ? Number(reqKarma) : null,
+      req_item_id: reqItem || null,
+      player_max_uses: playerMax ? Number(playerMax) : null,
+      global_max_uses: globalMax ? Number(globalMax) : null,
+    };
+    const r = await run(() => upsertQuickAction(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (

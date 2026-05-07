@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { Package, Plus, Edit2, Trash2, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { upsertItem, deleteItem, type ItemRow, type ItemPayload } from '@/app/actions/admin';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props { initialItems: ItemRow[] }
 
@@ -12,6 +13,7 @@ export default function ItemsClient({ initialItems }: Props) {
   const [editing, setEditing] = useState<ItemRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -20,11 +22,11 @@ export default function ItemsClient({ initialItems }: Props) {
 
   async function handleDelete(item: ItemRow) {
     if (!(await confirm({ message: `刪除道具「${item.name}」？玩家持有的此道具與綁定快捷模組的關聯也會一併處理。`, danger: true }))) return;
-    const r = await deleteItem(item.id);
-    if (r.ok) {
+    const r = await run(() => deleteItem(item.id));
+    if (r?.ok) {
       setItems((arr) => arr.filter((x) => x.id !== item.id));
       showToast(true, '已刪除');
-    } else showToast(false, r.error?.message ?? '刪除失敗');
+    }
   }
 
   return (
@@ -111,17 +113,14 @@ function ItemModal({
   const [icon, setIcon] = useState(target?.icon ?? '🎁');
   const [description, setDesc] = useState(target?.description ?? '');
   const [isActive, setIsActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: ItemPayload = { id: target?.id, name, icon, description, is_active: isActive };
-      const r = await upsertItem(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: ItemPayload = { id: target?.id, name, icon, description, is_active: isActive };
+    const r = await run(() => upsertItem(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (

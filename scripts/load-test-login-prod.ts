@@ -11,7 +11,7 @@
  *
  * 壓測完記得移除 `LOAD_TEST_ENABLED` 並 redeploy 關閉 endpoint。
  *
- * 報告：docs/testspeed_login_prod_0505.md
+ * 報告：docs/0505_testspeed_login_prod.md
  */
 
 import { config as loadEnv } from 'dotenv';
@@ -226,7 +226,7 @@ async function main() {
 
   // 寫報告
   const md = renderReport({ url, mode: MODE, intervalMs: SPACED_INTERVAL_MS, wallMs, stats });
-  const dest = join(process.cwd(), 'docs', 'testspeed_login_prod_0505.md');
+  const dest = join(process.cwd(), 'docs', '0505_testspeed_login_prod.md');
   writeFileSync(dest, md, 'utf-8');
   console.log(`\n📝 報告寫入：${dest}`);
 }

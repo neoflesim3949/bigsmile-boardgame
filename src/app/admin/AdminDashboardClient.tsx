@@ -18,6 +18,7 @@ import {
 } from '@/app/actions/admin';
 import { tickRound } from '@/app/actions/round';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   initial: AdminDashboardData;
@@ -35,7 +36,10 @@ export default function AdminDashboardClient({ initial }: Props) {
   const [data, setData] = useState<AdminDashboardData>(initial);
   const [marqueeText, setMarqueeText] = useState(initial.board.marquee_text);
   const [marqueeMins, setMarqueeMins] = useState(60);
-  const [busy, busyTransition] = useTransition();
+  // 讀路徑（reload）保留 useTransition；寫路徑改用 WriteGuard 提供統一 loading + fail 訊息
+  const [readBusy, busyTransition] = useTransition();
+  const { busy: writeBusy, run } = useWriteGuard();
+  const busy = readBusy || writeBusy;
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
 
@@ -84,25 +88,21 @@ export default function AdminDashboardClient({ initial }: Props) {
     if (r.ok) setData(r.data!);
   }
 
-  function handleToggle(key: 'TourMode' | 'CardDrawMode', value: boolean) {
-    busyTransition(async () => {
-      const r = await setQuickFlag(key, value);
-      if (r.ok) {
-        await reload();
-        showToast(true, `${key === 'TourMode' ? '導覽遊戲' : '抽卡模式'}：${value ? '已啟用' : '已關閉'}`);
-      } else showToast(false, r.error?.message ?? '');
-    });
+  async function handleToggle(key: 'TourMode' | 'CardDrawMode', value: boolean) {
+    const r = await run(() => setQuickFlag(key, value));
+    if (r?.ok) {
+      await reload();
+      showToast(true, `${key === 'TourMode' ? '導覽遊戲' : '抽卡模式'}：${value ? '已啟用' : '已關閉'}`);
+    }
   }
 
-  function handleStartGame() {
+  async function handleStartGame() {
     if (!data.flags.tour_mode || !data.flags.card_draw_mode) return;
-    busyTransition(async () => {
-      const r = await setQuickFlag('BoardGameEnabled', true);
-      if (r.ok) {
-        await reload();
-        showToast(true, '遊戲已開始');
-      } else showToast(false, r.error?.message ?? '');
-    });
+    const r = await run(() => setQuickFlag('BoardGameEnabled', true));
+    if (r?.ok) {
+      await reload();
+      showToast(true, '遊戲已開始');
+    }
   }
 
   async function handleTriggerScoring() {
@@ -111,68 +111,58 @@ export default function AdminDashboardClient({ initial }: Props) {
       danger: true,
       confirmText: '觸發結算',
     }))) return;
-    busyTransition(async () => {
-      const r = await triggerFinalScoring();
-      if (r.ok) {
-        await reload();
-        showToast(true, '終局結算已觸發');
-      } else showToast(false, r.error?.message ?? '');
-    });
+    const r = await run(() => triggerFinalScoring());
+    if (r?.ok) {
+      await reload();
+      showToast(true, '終局結算已觸發');
+    }
   }
 
   const [restartModalOpen, setRestartModalOpen] = useState(false);
 
   async function performRestart() {
-    const r = await restartGameCycle();
-    if (r.ok) {
+    const r = await run(() => restartGameCycle());
+    if (r?.ok) {
       await reload();
       showToast(true, '系統已重置，請依序按「導覽遊戲」「抽卡模式」再按「遊戲開始」');
     } else {
-      showToast(false, r.error?.message ?? '重啟失敗');
-      throw new Error(r.error?.message ?? 'failed');
+      // overlay 已顯示錯誤；丟 throw 讓 modal 知道失敗以便保留輸入
+      throw new Error(r?.error?.message ?? 'failed');
     }
   }
 
-  function handleTick() {
-    busyTransition(async () => {
-      const r = await tickRound();
-      if (r.ok) {
-        await reload();
-        showToast(true, `推進到第 ${r.data!.round} 回合（結算 ${r.data!.players_settled} 位借款玩家）`);
-      } else showToast(false, r.error?.message ?? '');
-    });
+  async function handleTick() {
+    const r = await run(() => tickRound());
+    if (r?.ok) {
+      await reload();
+      showToast(true, `推進到第 ${r.data!.round} 回合（結算 ${r.data!.players_settled} 位借款玩家）`);
+    }
   }
 
-  function handlePublishMarquee() {
+  async function handlePublishMarquee() {
     if (!marqueeText.trim()) return;
-    busyTransition(async () => {
-      const r = await publishMarquee(marqueeText, marqueeMins);
-      if (r.ok) {
-        showToast(true, '已發送至看板');
-        await reload();
-      } else showToast(false, r.error?.message ?? '');
-    });
+    const r = await run(() => publishMarquee(marqueeText, marqueeMins));
+    if (r?.ok) {
+      showToast(true, '已發送至看板');
+      await reload();
+    }
   }
 
-  function handleClearMarquee() {
-    busyTransition(async () => {
-      const r = await clearMarquee();
-      if (r.ok) {
-        setMarqueeText('');
-        await reload();
-        showToast(true, '已清除跑馬燈');
-      } else showToast(false, r.error?.message ?? '');
-    });
+  async function handleClearMarquee() {
+    const r = await run(() => clearMarquee());
+    if (r?.ok) {
+      setMarqueeText('');
+      await reload();
+      showToast(true, '已清除跑馬燈');
+    }
   }
 
-  function handleSetMultiplier(v: number) {
-    busyTransition(async () => {
-      const r = await setExchangeRateMultiplier(v);
-      if (r.ok) {
-        await reload();
-        showToast(true, `匯率倍率：${formatMultiplier(v)}`);
-      } else showToast(false, r.error?.message ?? '');
-    });
+  async function handleSetMultiplier(v: number) {
+    const r = await run(() => setExchangeRateMultiplier(v));
+    if (r?.ok) {
+      await reload();
+      showToast(true, `匯率倍率：${formatMultiplier(v)}`);
+    }
   }
 
   const [customOpen, setCustomOpen] = useState(false);

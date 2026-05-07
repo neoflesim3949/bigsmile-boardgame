@@ -68,7 +68,7 @@
 - 多 row 鎖：固定 `user_id` 升序排序避免死鎖
 - **不鎖 `Stock` row**：股價以呼叫當下 `current_price` 成交（避免買賣序列化）
 - **`withTx` 內建 deadlock auto-retry**：偵測到 PG SQLState `40P01` 自動 ROLLBACK + 換 client + 等 50ms 重試，最多 2 次。對抗環境差異 / 並發抖動造成的偶發 deadlock，業務錯誤（INSUFFICIENT_FUNDS 等）不重試
-- **pg pool 三道 timeout 保險絲**（[problem_0507.md](docs/problem_0507.md) §2/§4）：`connectionTimeoutMillis: 5s`（拿不到連線 5s 放棄）+ `query_timeout: 30s`（client 端）+ `statement_timeout: 30s`（PG 端）。**避免 1 個壞 query 占連線永久、後續 acquire 也 hang**。修改 pool config 時不可移除這三項
+- **pg pool 三道 timeout 保險絲**（[0507_problem.md](docs/0507_problem.md) §2/§4）：`connectionTimeoutMillis: 5s`（拿不到連線 5s 放棄）+ `query_timeout: 30s`（client 端）+ `statement_timeout: 30s`（PG 端）。**避免 1 個壞 query 占連線永久、後續 acquire 也 hang**。修改 pool config 時不可移除這三項
 - **TIMEOUT 錯誤碼**（[lib/error.ts](src/lib/error.ts)）：`fail()` 偵測上述三道 timeout（SQLState `57014` / pg client / pg pool 訊息）→ 回 `TIMEOUT` code + 訊息「系統忙線，請 5 秒後再試」。**禁止**把 timeout 混進 `INTERNAL_ERROR`（玩家分不清楚要不要重試 / 是否雙重提交）。LoginForm 的 retry 白名單同時收 `INTERNAL_ERROR` + `TIMEOUT`
 - **tx 內取 / 寫 setting 一律傳 `client`**：`getSetting(key, client)` / `getSettings(keys, client)` / `setSetting(key, value, actor, client)`。**禁用** standalone — 否則會走獨立連線占用第 2 個 pool slot，500 並發雙倍消耗 pool（pool=10 production 等於 10% 直接浪費）
 - **凍結態檢查用合併 helper**：玩家寫入 action 第一行用 `assertNotFrozen(client)` 取代 `assertNotDuringFinalScoring + assertNotTourMode`（從 2 個 round-trip 降到 1）
@@ -199,7 +199,7 @@ assertPlayerAlive(stats)   // ← 統一 guard
 - 「開啟活動看板」link → `/admin/events`（去發 display token）
 
 **B. 3 控制台**
-- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（**單一 tx** + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）。前置條件：`BoardGameEnabled='true'` && 終局未觸發；不符直接 FORBIDDEN。第 1 回合推進時 UPSERT `TourMode='false'`。**單一 tx 涵蓋**：股價更新 + 回合 +1 + 強制平倉 + 業力影響 + 借款利息結算 + recompute final_score（[problem_0507.md](docs/problem_0507.md) §6.2 — 原本拆兩個 tx 會留半完成狀態，已合併）。三個控制面板等高 `xl:h-[420px]`，推進歷史內部 `h-32` fixed scroll，內容超過走滾動不撐高 panel
+- **回合控制面板**：「推進下一回合」按鈕 → `tickRound()`（**單一 tx** + 30 秒節流 + 套用 StockRoundScript / StockRoundEvent）。前置條件：`BoardGameEnabled='true'` && 終局未觸發；不符直接 FORBIDDEN。第 1 回合推進時 UPSERT `TourMode='false'`。**單一 tx 涵蓋**：股價更新 + 回合 +1 + 強制平倉 + 業力影響 + 借款利息結算 + recompute final_score（[0507_problem.md](docs/0507_problem.md) §6.2 — 原本拆兩個 tx 會留半完成狀態，已合併）。三個控制面板等高 `xl:h-[420px]`，推進歷史內部 `h-32` fixed scroll，內容超過走滾動不撐高 panel
 - **股票腳本值 = 0 的語意**：`StockRoundScript.change_value`（`/admin/stocks` 回合腳本總表）允許設 0：
   - `fixed = 0`：該回合股價直接歸零（暴跌劇情）。後端 `buyStock` 加 guard 拒絕 `price <= 0` 的買單；前端股市買進按鈕顯示「停止交易」disabled
   - `percent = 0`：該回合股價鎖定**不變動**（與「無腳本走 ±5% 隨機」不同）
@@ -279,6 +279,31 @@ assertPlayerAlive(stats)   // ← 統一 guard
 ### 6.3 無障礙
 - 漲跌**不能只靠紅綠色** — 必須加 ↑↓ 箭頭（色盲友善）
 - 看板配色可後台切換「紅漲綠跌 / 綠漲紅跌」
+
+### 6.4 寫入動作守護（WriteGuard，CRITICAL）
+
+**所有 server action 寫入入口都必須走 [`useWriteGuard().run(...)`](src/components/shared/WriteGuard.tsx)**。規則：
+
+1. **單一寫入 in-flight**：寫入中再觸發任何 write 直接擋下（busy flag + ref lock）
+2. **全螢幕 overlay**：寫入中顯示「⏳ 寫入中…」全螢幕半透明覆蓋（`pointer-events-auto` 擋所有點擊）
+3. **失敗訊息**：失敗顯示具體錯誤（業務錯誤如「金錢不足」維持原訊息、TIMEOUT 顯示「系統忙線，請 5 秒後再試」、未知錯誤 fallback「寫入失敗，請再試一次」）
+4. **使用者必須點「確定」**才能關閉錯誤 overlay → 強迫看到失敗訊息、不會誤以為成功
+
+**用法**：
+```ts
+const { busy, run } = useWriteGuard();
+const r = await run(() => buyStock({ stockId, shares }));
+if (r?.ok) setToast({ ok: true, msg: '買入成功' });
+// 失敗不需自己處理，overlay 已經顯示 r.error.message
+```
+
+**例外（不走 WriteGuard 的場景）**：
+- `/onboarding` `drawDestiny`：有專屬 shuffle 動畫（強制 1.5s 最短）當 loading UI，覆蓋 overlay 反破壞動畫
+- `/login`：自帶 exp backoff retry + 「目前登入人潮較多」友善訊息（LoginForm.tsx）
+- `/admin/stocks` 表格 cell 自動保存：每改一格觸發、覆蓋 overlay 會閃爍干擾編輯
+- 讀取（list / lookup / refresh）：用 `useTransition` 即可
+
+**禁止**直接在 onClick 裡 `await someAction()` 不走 WriteGuard 也不走 useTransition — 玩家可重複點擊或切到別頁導致狀態混亂。
 
 ---
 
@@ -397,14 +422,14 @@ app/
 
 | 檔案 | 為何 review 時要看 |
 |------|-------------------|
-| `Possible_errors_0505.md` | 已知殘留 bug 評估 + smoke checklist — 別把 review 成果重複指出已記錄的 |
-| `code_review_fix_plan_0505.md` / `code_review_fix_results_0505.md` | 上一輪 review 已修 / 不修的決議 — 避免推翻定案 |
-| `event_runbook_0506.md` | 活動現場 SOP — 改動是否破壞 runbook 假設 |
+| `0505_possible_errors.md` | 已知殘留 bug 評估 + smoke checklist — 別把 review 成果重複指出已記錄的 |
+| `0505_code_review_fix_plan.md` / `0505_code_review_fix_results.md` | 上一輪 review 已修 / 不修的決議 — 避免推翻定案 |
+| `0506_event_runbook.md` | 活動現場 SOP — 改動是否破壞 runbook 假設 |
 | `supabase_error_log.md` | 已歸類的「無害」DB 錯誤 — 別誤報 |
-| `different_NeoV2&BigsmileUnity.md` | 跨版本差異與 5/5 會議結論 — 避免提議「補上體系版有但 Neo 沒做」的功能（已決議不做）|
-| `perf_round_trip_0505.md` / `N+1_report.md` | 效能基準與已套用的優化 — 避免重複建議 |
+| `0506_different_NeoV2_Unity.md` | 跨版本差異與 5/5 會議結論 — 避免提議「補上體系版有但 Neo 沒做」的功能（已決議不做）|
+| `0505_perf_round_trip.md` / `N+1_report.md` | 效能基準與已套用的優化 — 避免重複建議 |
 | `safety_report.md` | 安全相關 review 結論 |
-| `sol_0507.md` 等 sol_*.md | 架構決策（如備援方案）— 避免推翻已決定的取向 |
+| `0507_sol.md` 等 sol_*.md | 架構決策（如備援方案）— 避免推翻已決定的取向 |
 
 **規則**：任何 code review（無論是 PR、`/review`、user 直接要求審）開始前都先把 `docs/` 整遍 `ls` 並讀過再做判斷。漏讀任何一份都可能導致 review 結論跟既有決策衝突。
 
@@ -458,6 +483,7 @@ app/
 - [ ] 漲跌只用紅綠沒加箭頭（color-blind 友善必加 ↑↓）；**flat / 持平**用 `lucide Minus` icon（`−` 形狀）會被誤認為「股價是負數」，要改成 invisible spacer 維持對齊
 - [ ] 觸控目標 < 44px
 - [ ] 用 `window.confirm` / `window.alert`（→ mobile Safari 會擋；改用 `useConfirm()`，CLAUDE.md §6.1）
+- [ ] 寫入入口（buyStock / applyQuickAction / tickRound 等）沒走 `useWriteGuard().run(...)` 包裝（→ 會缺全螢幕 loading + 失敗 overlay；CLAUDE.md §6.4）。例外：onboarding drawDestiny / login / admin stocks 表格 cell 自動保存 / 讀路徑（這些有專屬 UI）
 - [ ] Scanner 沒用 dynamic import 導致 SSR 錯誤
 - [ ] **淺色模式**新增的半透明色（`bg-zinc-XXX/40` `/50` `/95`、`bg-emerald-950/40`、`bg-rose-950/40`、`bg-amber-950/30`、`bg-sky-950/40`、`border-emerald-900/60` 等）沒在 `globals.css` 的 `[data-theme="light"]` 區塊覆蓋 → 淺色頁面會看到深底深字無法閱讀。新增類別前先 grep `globals.css` 確認有覆蓋，否則同步補。**已補的色系**：`bg-zinc-950/{30,70,85}`、`bg-{amber/emerald/teal/rose/purple/sky}-500/{10,15,20}`、`border-{amber/emerald/teal/rose/purple/sky}-500/30`、`border-zinc-{700,800}/{50,60}`、`text-{purple/sky}-400`、`text-yellow-300`、`text-amber-500`
 - [ ] 看板 `/display/board` 終局結算後 toggle 「返回常規模式」無效 — 不可寫 `isFinal = forceFinal || final_scoring_triggered_at`（被 server 鎖死），要改成 `userOverride !== null ? userOverride : serverIsFinal` 讓 user 真的能切回看股市

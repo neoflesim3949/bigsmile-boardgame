@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Plus, Edit2, Trash2, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
@@ -10,6 +10,7 @@ import {
   type SellMultiplierRow,
 } from '@/app/actions/captain';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface ItemLite { id: string; name: string; icon: string }
 
@@ -25,6 +26,7 @@ export default function MultipliersClient({
   const [editing, setEditing] = useState<{ stationId: string; row: SellMultiplierRow | null } | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
   const itemMap = new Map(items.map((i) => [i.id, i]));
 
   function showToast(ok: boolean, msg: string) {
@@ -119,11 +121,11 @@ export default function MultipliersClient({
                             <button
                               onClick={async () => {
                                 if (!(await confirm({ message: `確定刪除倍率「${m.label}」？`, danger: true }))) return;
-                                const r = await deleteStationSellMultiplier(m.id);
-                                if (r.ok) {
+                                const r = await run(() => deleteStationSellMultiplier(m.id));
+                                if (r?.ok) {
                                   setMults((arr) => arr.filter((x) => x.id !== m.id));
                                   showToast(true, '已刪除');
-                                } else showToast(false, r.error?.message ?? '刪除失敗');
+                                }
                               }}
                               className="p-1.5 text-zinc-400 hover:text-rose-400"
                             >
@@ -195,29 +197,26 @@ function MultiplierModal({
   const [reqItemIds, setReqItemIds] = useState<string[]>(target?.req_item_ids ?? []);
   const [sortOrder, setSortOrder] = useState(target?.sort_order?.toString() ?? '0');
   const [isActive, setIsActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
   function toggleItem(id: string) {
     setReqItemIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]);
   }
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const r = await upsertStationSellMultiplier({
-        id: target?.id,
-        station_id: stationId,
-        label,
-        money_multiplier: Number(moneyMult) || 0,
-        blessing_penalty_multiplier: Number(blessingMult) || 0,
-        req_item_ids: reqItemIds,
-        sort_order: Number(sortOrder) || 0,
-        is_active: isActive,
-      });
-      if (r.ok) onSaved(r.data!);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const r = await run(() => upsertStationSellMultiplier({
+      id: target?.id,
+      station_id: stationId,
+      label,
+      money_multiplier: Number(moneyMult) || 0,
+      blessing_penalty_multiplier: Number(blessingMult) || 0,
+      req_item_ids: reqItemIds,
+      sort_order: Number(sortOrder) || 0,
+      is_active: isActive,
+    }));
+    if (r?.ok) onSaved(r.data!);
   }
 
   // 預覽：1 萬獲利時的影響（divisor 來自 AppSettings.StockSellBlessingPenaltyDivisor）

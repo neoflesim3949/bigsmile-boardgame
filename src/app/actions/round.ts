@@ -9,7 +9,7 @@ import { recomputeAllPlayerScores } from '@/lib/score';
 
 /**
  * tickRound：主持人按「下一回合」。
- * **單一 pg tx**（problem_0507.md §6.2）：股價 + 回合 +1 + 強制平倉 + 業力影響 + 借款利息結算
+ * **單一 pg tx**（0507_problem.md §6.2）：股價 + 回合 +1 + 強制平倉 + 業力影響 + 借款利息結算
  * + 重算 final_score。原本拆兩 tx 是想縮短 lock window，但會留半完成狀態（tx1 commit + tx2 fail
  * → 回合 +1 但利息沒扣、下次按又進下個回合）。改成單 tx 後一致性 100%，admin tick 鎖
  * PlayerStats 行多 ~100ms × 12 ticks = 整場 ~1.2 秒（可接受）。

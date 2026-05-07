@@ -1,11 +1,11 @@
 # Code Review — 0505_1（13 條修補的回頭審查）
 
-> 審查範圍：`docs/skill_code_review_0505.md` 列出的 13 條修補（H1, H2, M1-M4, L1-L7）
+> 審查範圍：`docs/0505_skill_code_review.md` 列出的 13 條修補（H1, H2, M1-M4, L1-L7）
 > 目的：檢查修補本身有沒有引入新問題、是否與 review 解法一致、是否完整覆蓋同類問題
 >
 > 審查時間：2026-05-05（同日二輪）
 > 審查人：Claude（subagent code-review，第二輪）
-> 對齊規範：`CLAUDE.md` / `docs/skill_code_review_0505.md` / `docs/BOARD_GAME_V2.md`
+> 對齊規範：`CLAUDE.md` / `docs/0505_skill_code_review.md` / `docs/BOARD_GAME_V2.md`
 
 ---
 

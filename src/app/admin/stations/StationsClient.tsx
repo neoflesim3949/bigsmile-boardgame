@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { MapPin, Plus, Edit2, Trash2, X, AlertCircle, CheckCircle2, Sparkles } from 'lucide-react';
 import {
   upsertStation,
@@ -9,6 +9,7 @@ import {
   type StationPayload,
 } from '@/app/actions/admin';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Captain { user_id: string; name: string }
 
@@ -22,6 +23,7 @@ export default function StationsClient({ initialStations, captains }: Props) {
   const [editing, setEditing] = useState<StationRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -30,11 +32,11 @@ export default function StationsClient({ initialStations, captains }: Props) {
 
   async function handleDelete(s: StationRow) {
     if (!(await confirm({ message: `確定刪除關卡「${s.name}」？\n關聯的快捷模組與使用紀錄也會被刪除。`, danger: true }))) return;
-    const r = await deleteStation(s.id);
-    if (r.ok) {
+    const r = await run(() => deleteStation(s.id));
+    if (r?.ok) {
       setStations((arr) => arr.filter((x) => x.id !== s.id));
       showToast(true, '已刪除');
-    } else showToast(false, r.error?.message ?? '刪除失敗');
+    }
   }
 
   return (
@@ -160,31 +162,28 @@ function StationModal({
   const [playerMax, setPlayerMax] = useState<string>(target?.player_max_uses?.toString() ?? '');
   const [globalMax, setGlobalMax] = useState<string>(target?.global_max_uses?.toString() ?? '');
   const [isActive, setIsActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
   function toggleCaptain(uid: string) {
     setCaptainIds((arr) => (arr.includes(uid) ? arr.filter((x) => x !== uid) : [...arr, uid]));
   }
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: StationPayload = {
-        id: target?.id,
-        name,
-        description,
-        captain_user_ids: captainIds,
-        allow_rebirth: allowRebirth,
-        allow_stock_sell_multiplier: allowStockMult,
-        player_max_uses: playerMax ? Number(playerMax) : null,
-        global_max_uses: globalMax ? Number(globalMax) : null,
-        is_active: isActive,
-      };
-      const r = await upsertStation(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: StationPayload = {
+      id: target?.id,
+      name,
+      description,
+      captain_user_ids: captainIds,
+      allow_rebirth: allowRebirth,
+      allow_stock_sell_multiplier: allowStockMult,
+      player_max_uses: playerMax ? Number(playerMax) : null,
+      global_max_uses: globalMax ? Number(globalMax) : null,
+      is_active: isActive,
+    };
+    const r = await run(() => upsertStation(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (

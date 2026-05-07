@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { getMyStats } from '@/app/actions/player';
 import { buyStock, sellStock, lookupStockByCode, getStockMarket, type StockMarketRow } from '@/app/actions/stock';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface InitialData {
   stocks: StockMarketRow[];
@@ -285,8 +286,8 @@ function TradeModal({
   onDone: () => void;
 }) {
   const [shares, setShares] = useState('1');
-  const [busy, busyTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const { busy, run } = useWriteGuard();
 
   const n = Math.max(0, Math.floor(Number(shares) || 0));
   const total = n * stock.current_price;
@@ -294,27 +295,23 @@ function TradeModal({
   const maxBuyShares = stock.current_price > 0 ? Math.floor(myMoney / stock.current_price) : 0;
   const maxSellShares = stock.shares;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     setErr(null);
-    busyTransition(async () => {
-      if (action === 'buy') {
-        if (n <= 0 || total > myMoney) {
-          setErr('股數無效或金錢不足');
-          return;
-        }
-        const r = await buyStock({ stockId: stock.id, shares: n });
-        if (r.ok) onDone();
-        else setErr(r.error?.message ?? '買進失敗');
-      } else {
-        if (n <= 0 || n > stock.shares) {
-          setErr('股數超過持股');
-          return;
-        }
-        const r = await sellStock({ stockId: stock.id, shares: n });
-        if (r.ok) onDone();
-        else setErr(r.error?.message ?? '賣出失敗');
+    if (action === 'buy') {
+      if (n <= 0 || total > myMoney) {
+        setErr('股數無效或金錢不足');
+        return;
       }
-    });
+      const r = await run(() => buyStock({ stockId: stock.id, shares: n }));
+      if (r?.ok) onDone();
+    } else {
+      if (n <= 0 || n > stock.shares) {
+        setErr('股數超過持股');
+        return;
+      }
+      const r = await run(() => sellStock({ stockId: stock.id, shares: n }));
+      if (r?.ok) onDone();
+    }
   }
 
   return (

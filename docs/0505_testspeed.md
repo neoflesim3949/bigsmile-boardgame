@@ -5,7 +5,7 @@
 
 ## 為什麼測這 6 個情境？
 
-先前測試（[testspeed_0504_1.md](testspeed_0504_1.md)）發現 Phase 1/3/4/5 都是 **admin 端 / 自動運算**（一場活動只跑一次或十幾次），實際**熱路徑**是三件事：
+先前測試（[0504_testspeed_1.md](0504_testspeed_1.md)）發現 Phase 1/3/4/5 都是 **admin 端 / 自動運算**（一場活動只跑一次或十幾次），實際**熱路徑**是三件事：
 
 - **玩家買股**（`buyStock`）— 玩家自發、頻繁、隨機分散
 - **玩家賣股**（`sellStock`）— 含 `profit > 0` 時的 blessing_penalty 計算

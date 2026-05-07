@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { Coins, Landmark, Plus, Edit2, Trash2, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import {
   upsertExchangeOption,
@@ -13,6 +13,7 @@ import {
   type BankLoanOptionPayload,
 } from '@/app/actions/admin';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   initialExchange: ExchangeOptionRow[];
@@ -26,6 +27,7 @@ export default function FinanceClient({ initialExchange, initialLoan }: Props) {
   const [editingLoan, setEditingLoan] = useState<BankLoanOptionRow | 'new' | null>(null);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -64,11 +66,11 @@ export default function FinanceClient({ initialExchange, initialLoan }: Props) {
                   <button
                     onClick={async () => {
                       if (!(await confirm({ message: `刪除方案「${opt.label}」？`, danger: true }))) return;
-                      const r = await deleteExchangeOption(opt.id);
-                      if (r.ok) {
+                      const r = await run(() => deleteExchangeOption(opt.id));
+                      if (r?.ok) {
                         setExchange((arr) => arr.filter((x) => x.id !== opt.id));
                         showToast(true, '已刪除');
-                      } else showToast(false, r.error?.message ?? '');
+                      }
                     }}
                     className="p-1.5 text-zinc-400 hover:text-rose-400"
                   >
@@ -119,11 +121,11 @@ export default function FinanceClient({ initialExchange, initialLoan }: Props) {
                   <button
                     onClick={async () => {
                       if (!(await confirm({ message: `刪除方案「${opt.label}」？`, danger: true }))) return;
-                      const r = await deleteBankLoanOption(opt.id);
-                      if (r.ok) {
+                      const r = await run(() => deleteBankLoanOption(opt.id));
+                      if (r?.ok) {
                         setLoan((arr) => arr.filter((x) => x.id !== opt.id));
                         showToast(true, '已刪除');
-                      } else showToast(false, r.error?.message ?? '');
+                      }
                     }}
                     className="p-1.5 text-zinc-400 hover:text-rose-400"
                   >
@@ -192,24 +194,21 @@ function ExchangeModal({
   const [mgain, setMgain] = useState<string>(target?.money_gain_per_unit.toString() ?? '10');
   const [order, setOrder] = useState<string>(target?.display_order.toString() ?? '0');
   const [active, setActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: ExchangeOptionPayload = {
-        id: target?.id,
-        label,
-        blessing_cost_per_unit: Number(bcost) || 1,
-        money_gain_per_unit: Number(mgain) || 1,
-        display_order: Number(order) || 0,
-        is_active: active,
-      };
-      const r = await upsertExchangeOption(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: ExchangeOptionPayload = {
+      id: target?.id,
+      label,
+      blessing_cost_per_unit: Number(bcost) || 1,
+      money_gain_per_unit: Number(mgain) || 1,
+      display_order: Number(order) || 0,
+      is_active: active,
+    };
+    const r = await run(() => upsertExchangeOption(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (
@@ -247,26 +246,23 @@ function LoanModal({
   const [intBless, setIntBless] = useState<string>(target?.interest_blessing_per_round.toString() ?? '0');
   const [order, setOrder] = useState<string>(target?.display_order.toString() ?? '0');
   const [active, setActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: BankLoanOptionPayload = {
-        id: target?.id,
-        label,
-        blessing_collateral_per_unit: Number(collateral) || 1,
-        money_per_unit: Number(money) || 1,
-        interest_money_per_round: Math.max(0, Number(intMoney) || 0),
-        interest_blessing_per_round: Math.max(0, Number(intBless) || 0),
-        display_order: Number(order) || 0,
-        is_active: active,
-      };
-      const r = await upsertBankLoanOption(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: BankLoanOptionPayload = {
+      id: target?.id,
+      label,
+      blessing_collateral_per_unit: Number(collateral) || 1,
+      money_per_unit: Number(money) || 1,
+      interest_money_per_round: Math.max(0, Number(intMoney) || 0),
+      interest_blessing_per_round: Math.max(0, Number(intBless) || 0),
+      display_order: Number(order) || 0,
+      is_active: active,
+    };
+    const r = await run(() => upsertBankLoanOption(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (

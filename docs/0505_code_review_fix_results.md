@@ -1,8 +1,8 @@
 # Code Review 修正結果 — 全 bundle 套用
 
 > 撰寫日期：2026-05-05
-> 對應計畫：[code_review_fix_plan_0505.md](code_review_fix_plan_0505.md)
-> 來源 review：[skill_code_review.md](skill_code_review.md) / [skill_code_review_0504.md](skill_code_review_0504.md)
+> 對應計畫：[0505_code_review_fix_plan.md](0505_code_review_fix_plan.md)
+> 來源 review：[skill_code_review.md](skill_code_review.md) / [0504_skill_code_review.md](0504_skill_code_review.md)
 
 ## 摘要
 
@@ -117,7 +117,7 @@
 - ✅ [CLAUDE.md §6.1](../CLAUDE.md#61-響應式鐵則)：禁用 `window.confirm`、`useConfirm()` 規則
 - ✅ [CLAUDE.md §11 資料庫紅旗](../CLAUDE.md#資料庫)：`setSetting` 沒傳 client
 - ✅ [CLAUDE.md §11 UI 紅旗](../CLAUDE.md#ui)：用 `window.confirm` / `window.alert`
-- ✅ [code_review_fix_plan_0505.md](code_review_fix_plan_0505.md)：原計畫
+- ✅ [0505_code_review_fix_plan.md](0505_code_review_fix_plan.md)：原計畫
 - ✅ 本檔（修正結果）
 
 ## 驗收

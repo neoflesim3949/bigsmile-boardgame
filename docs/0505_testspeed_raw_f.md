@@ -1,6 +1,6 @@
 # 壓測結果改善對照 — 套用 round-trip 優化前 vs 後
 
-> 由 [perf_round_trip_0505.md](perf_round_trip_0505.md) 4 項優化套用後實測對照
+> 由 [0505_perf_round_trip.md](0505_perf_round_trip.md) 4 項優化套用後實測對照
 > 執行時間：2026-05-05（兩次相隔約 30 分鐘，相同 Supabase free tier 環境）
 > 環境：500 並發 / pool=100 / PgBouncer 6543 / 1995 @ $60
 
@@ -21,7 +21,7 @@ P2 avg 改善 **-22% / 932ms** 最有感；其他指標也有明確進步。0 de
 
 ## 套用的 4 項優化
 
-對應 [perf_round_trip_0505.md](perf_round_trip_0505.md)：
+對應 [0505_perf_round_trip.md](0505_perf_round_trip.md)：
 
 1. **`getSetting` 加 optional `client` 參數**（[settings.ts:71](../src/lib/settings.ts#L71)）— tx 內呼叫不再占第 2 條 connection
 2. **`assertNotFrozen(client)` 合併** `assertNotDuringFinalScoring` + `assertNotTourMode`（[auth.ts](../src/lib/auth.ts)）— 11 處 caller 替換、2 個 round-trip → 1 個
@@ -121,7 +121,7 @@ P2 avg 改善 **-22% / 932ms** 最有感；其他指標也有明確進步。0 de
 
 ### 對現實活動的影響
 
-依 [testspeed_0505_s.md](testspeed_0505_s.md) 的 spaced 測試結論，現實活動到達速率為 600ms / 14400ms 間隔（不是 25ms 同步壓測）。在這些情境下：
+依 [0505_testspeed_s.md](0505_testspeed_s.md) 的 spaced 測試結論，現實活動到達速率為 600ms / 14400ms 間隔（不是 25ms 同步壓測）。在這些情境下：
 - 單請求 round-trip 從 9 → 5 = 直接救 ~80ms（4 × 20ms）
 - 玩家視角：buyStock 在 600ms 間隔下從 baseline ~310ms 預期降到 ~230ms，達 §12 < 300ms 規格
 
@@ -137,5 +137,5 @@ P2 avg 改善 **-22% / 932ms** 最有感；其他指標也有明確進步。0 de
 - ✅ [CLAUDE.md §11 資料庫紅旗清單](../CLAUDE.md#資料庫)：新增 3 條檢查項
 - ✅ [ARCH §14.5](BOARD_GAME_V2_ARCHITECTURE.md#145-連線池與-serverless)：tx 內傳 client 規則
 - ✅ [ARCH §14.9 模式 D](BOARD_GAME_V2_ARCHITECTURE.md#149-防止-n1-查詢)：合併 CTE 寫入
-- ✅ [perf_round_trip_0505.md](perf_round_trip_0505.md)：含設計、實測、後續
+- ✅ [0505_perf_round_trip.md](0505_perf_round_trip.md)：含設計、實測、後續
 - ✅ 本檔（前後對照）

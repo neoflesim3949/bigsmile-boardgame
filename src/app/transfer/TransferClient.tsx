@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react';
 import { ArrowLeft, Send, CheckCircle2, AlertCircle, QrCode, Search, X } from 'lucide-react';
 import { lookupPlayerById, decodePlayerQrToken, transferMoney } from '@/app/actions/player';
 import QrScannerModal from '@/components/QrScannerModal';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   myMoney: number;
@@ -21,7 +22,10 @@ export default function TransferClient({ myMoney, isDead, gameEnabled, finalScor
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
-  const [busy, busyTransition] = useTransition();
+  // 讀路徑（lookup / QR decode）保留 useTransition；寫路徑（transfer）走 WriteGuard
+  const [readPending, readTransition] = useTransition();
+  const { busy: writePending, run } = useWriteGuard();
+  const busy = readPending || writePending;
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [balance, setBalance] = useState(myMoney);
 
@@ -32,7 +36,7 @@ export default function TransferClient({ myMoney, isDead, gameEnabled, finalScor
       setMsg({ ok: false, text: '請輸入完整玩家 ID（≥ 6 碼）' });
       return;
     }
-    busyTransition(async () => {
+    readTransition(async () => {
       const r = await lookupPlayerById(idInput);
       if (r.ok) {
         setTarget(r.data!);
@@ -46,7 +50,7 @@ export default function TransferClient({ myMoney, isDead, gameEnabled, finalScor
 
   function handleQrScanned(token: string) {
     setScanOpen(false);
-    busyTransition(async () => {
+    readTransition(async () => {
       const r = await decodePlayerQrToken(token);
       if (r.ok) {
         setIdInput(r.data!.user_id);
@@ -58,7 +62,7 @@ export default function TransferClient({ myMoney, isDead, gameEnabled, finalScor
     });
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!target) return;
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) {
@@ -69,17 +73,13 @@ export default function TransferClient({ myMoney, isDead, gameEnabled, finalScor
       setMsg({ ok: false, text: '金錢不足' });
       return;
     }
-    busyTransition(async () => {
-      const r = await transferMoney({ toUserId: target.user_id, amount: n, note: note || undefined });
-      if (r.ok) {
-        setBalance(r.data!.new_balance);
-        setAmount('');
-        setNote('');
-        setMsg({ ok: true, text: `已成功轉帳 ${n} 給 ${target.name}` });
-      } else {
-        setMsg({ ok: false, text: r.error?.message ?? '轉帳失敗' });
-      }
-    });
+    const r = await run(() => transferMoney({ toUserId: target.user_id, amount: n, note: note || undefined }));
+    if (r?.ok) {
+      setBalance(r.data!.new_balance);
+      setAmount('');
+      setNote('');
+      setMsg({ ok: true, text: `已成功轉帳 ${n} 給 ${target.name}` });
+    }
   }
 
   return (

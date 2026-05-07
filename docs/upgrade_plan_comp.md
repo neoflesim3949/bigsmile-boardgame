@@ -1,7 +1,7 @@
 # Vercel / Supabase 升級評估 — 對「2 小時活動 / 500 玩家」一次性 event
 
 > 撰寫日期：2026-05-05
-> 對應實測數據：[testspeed_raw_0505.md](testspeed_raw_0505.md) / [testspeed_0505.md](testspeed_0505.md) / [testspeed_0505_s.md](testspeed_0505_s.md)
+> 對應實測數據：[0505_testspeed_raw.md](0505_testspeed_raw.md) / [0505_testspeed.md](0505_testspeed.md) / [0505_testspeed_s.md](0505_testspeed_s.md)
 > 結論：**Free tier 都不升，省 $25-60**。詳細逐項說明如下。
 
 ## TL;DR
@@ -80,7 +80,7 @@
 
 ## 3. 真實活動工作量 vs 測試極限
 
-對照 [testspeed_0505_s.md](testspeed_0505_s.md) 的 spaced 測試：
+對照 [0505_testspeed_s.md](0505_testspeed_s.md) 的 spaced 測試：
 
 | 場景 | 到達速率 | Free tier 能撐？ |
 |------|---------|-----------------|
@@ -89,9 +89,9 @@
 | 開盤秒殺 5 秒 200 人下單 | 40 ops/s | ⚠️ 接近邊界（但 spaced 測 p95 = 300ms 仍達標 §12）|
 | **同步壓測 500 人同毫秒** | 5000 ops/s | ❌ 慢（p95 5-8s）但**不會死** |
 
-最後這列才是 [testspeed_raw_0505.md](testspeed_raw_0505.md) 看到的「P1 p95 5.4s」— 而**這個情境永遠不會發生**（人類無法精準同毫秒按下）。
+最後這列才是 [0505_testspeed_raw.md](0505_testspeed_raw.md) 看到的「P1 p95 5.4s」— 而**這個情境永遠不會發生**（人類無法精準同毫秒按下）。
 
-對照 [testspeed_0505.md](testspeed_0505.md) 的 6 情境壓測，唯一現實會發生的尖峰（B 純 buy / C 純 sell / F 寫實尖峰）p95 都在 7-25 秒內處理完，**0 deadlock + 100% 一致性**。
+對照 [0505_testspeed.md](0505_testspeed.md) 的 6 情境壓測，唯一現實會發生的尖峰（B 純 buy / C 純 sell / F 寫實尖峰）p95 都在 7-25 秒內處理完，**0 deadlock + 100% 一致性**。
 
 ## 4. 推薦做法：Free tier 都不升
 
@@ -118,7 +118,7 @@
 
 ## 5. 為什麼 testspeed 的數字看起來嚇人但實際沒事
 
-[testspeed_raw_0505.md](testspeed_raw_0505.md) 是「500 玩家在同一毫秒同時按按鈕」的同步壓測（用 `Promise.all` 一次發 500 個請求）。這對應到：
+[0505_testspeed_raw.md](0505_testspeed_raw.md) 是「500 玩家在同一毫秒同時按按鈕」的同步壓測（用 `Promise.all` 一次發 500 個請求）。這對應到：
 
 - **JS event loop 內 sub-ms 排隊** + **PgBouncer free tier ~30 backend 序列化處理**
 - p95 = (500 / 30) × 單次處理時間 ≈ 5-8 秒
@@ -128,7 +128,7 @@
 - 大會主持人喊「開始」到玩家反應的延遲分布在 1-5 秒
 - 對應的到達速率最壞 ~100 ops/s（仍低於 free tier 60 ops/s 的 service rate × 短期 burst tolerance）
 
-**spaced 測試**（[testspeed_0505_s.md](testspeed_0505_s.md)）模擬真實到達速率，free tier 在所有現實場景下 p95 都 ≤ 1.7 秒，**已達 §12 規格**。
+**spaced 測試**（[0505_testspeed_s.md](0505_testspeed_s.md)）模擬真實到達速率，free tier 在所有現實場景下 p95 都 ≤ 1.7 秒，**已達 §12 規格**。
 
 ## 5b. 「PG backend 並發數」的 4 層優化方案
 
@@ -315,8 +315,8 @@ if (q.global_max_uses !== null && cnt.rows[0].count >= q.global_max_uses) throw 
 
 ## 附：依據實測數據
 
-- 同步 500 並發極限（free tier）：[testspeed_raw_0505.md](testspeed_raw_0505.md)
-- 6 情境 hot-path 壓測（含 multi-QA 寫實尖峰）：[testspeed_0505.md](testspeed_0505.md)
-- 18 組合 spaced 到達速率（最接近現實）：[testspeed_0505_s.md](testspeed_0505_s.md)
-- baseline vs all-bundle 優化對照：[testspeed_raw_0505_f.md](testspeed_raw_0505_f.md)
+- 同步 500 並發極限（free tier）：[0505_testspeed_raw.md](0505_testspeed_raw.md)
+- 6 情境 hot-path 壓測（含 multi-QA 寫實尖峰）：[0505_testspeed.md](0505_testspeed.md)
+- 18 組合 spaced 到達速率（最接近現實）：[0505_testspeed_s.md](0505_testspeed_s.md)
+- baseline vs all-bundle 優化對照：[0505_testspeed_raw_f.md](0505_testspeed_raw_f.md)
 - pool size 邊際效益分析：[testspeed.md](testspeed.md)

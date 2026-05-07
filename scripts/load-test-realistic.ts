@@ -21,7 +21,7 @@
  *   2. 之後 exponential(mean=180s) 間隔
  *   3. 跑滿 10 min 為止
  *
- * 報告：docs/testspeed_0505_realistic.md
+ * 報告：docs/0507_testspeed_realistic.md（最新：用 SCRIPT_DATE_TAG env 可指定）
  */
 
 import { config as loadEnv } from 'dotenv';
@@ -256,7 +256,8 @@ async function main() {
       inTickStat,
       outTickStat,
     });
-    const dest = join(process.cwd(), 'docs', 'testspeed_0505_realistic.md');
+    const dateTag = process.env.SCRIPT_DATE_TAG || '0507';
+    const dest = join(process.cwd(), 'docs', `${dateTag}_testspeed_realistic.md`);
     writeFileSync(dest, md, 'utf-8');
     console.log(`\n📝 報告已寫入：${dest}`);
   } finally {
@@ -355,7 +356,7 @@ function renderReport(a: ReportArgs): string {
     md.push(`⚠️ 出現 ${a.totalFail} 次失敗（其中 ${a.deadlocks} 個 deadlock），需追根因。`);
   }
   md.push('');
-  md.push(`對應 [testspeed_0505_s.md](testspeed_0505_s.md) 的 14400ms 間隔測試（每位玩家獨立、不混合）：`);
+  md.push(`對應 [0505_testspeed_s.md](0505_testspeed_s.md) 的 14400ms 間隔測試（每位玩家獨立、不混合）：`);
   md.push(`- 14400ms 是「平均到達率」最寬鬆的測試（0.07 ops/s 整場平均）`);
   md.push(`- 本檔加上「玩家不是 deterministic spread、是 Poisson 隨機」+「tick 干擾」+「mixed op」`);
   md.push(`- → 比 14400ms 嚴苛、比 25ms 寬鬆，最接近現實工作量`);

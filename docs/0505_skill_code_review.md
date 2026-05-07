@@ -1,6 +1,6 @@
 # Code Review — 0505（round-trip 優化波）
 
-> 審查範圍：`docs/perf_round_trip_0505.md` 設計後的實作改動
+> 審查範圍：`docs/0505_perf_round_trip.md` 設計後的實作改動
 > - `src/lib/settings.ts` / `src/lib/auth.ts` / `src/lib/qr.ts` / `src/lib/db.ts` / `src/lib/error.ts` / `src/lib/score.ts` / `src/lib/supabase-browser.ts`
 > - `src/app/actions/{stock,player,captain,round,admin}.ts`
 > - `src/components/shared/ConfirmProvider.tsx` + 11 client component 的 `useConfirm` 替換

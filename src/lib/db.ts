@@ -44,7 +44,7 @@ function getPool(): Pool {
       connectionString: url,
       max: 10,
       idleTimeoutMillis: 30_000,
-      // 卡死保險絲（problem_0507.md §2/§4）：避免 1 個壞 query 占連線永久、後續 acquire 也 hang。
+      // 卡死保險絲（0507_problem.md §2/§4）：避免 1 個壞 query 占連線永久、後續 acquire 也 hang。
       // - connectionTimeoutMillis：拿不到連線等 5s 就放棄（預設 0=等永遠）
       // - query_timeout：單 query client 端 30s 上限
       // - statement_timeout：PG 端 SET statement_timeout=30s 雙保險

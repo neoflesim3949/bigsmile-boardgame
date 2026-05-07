@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 import Link from 'next/link';
 import {
   Activity, Plus, Search, Eye, EyeOff, Edit, Trash2, X,
@@ -34,6 +35,7 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -42,11 +44,11 @@ export default function StocksClient({ initialStocks, initialScripts }: Props) {
 
   async function handleDelete(s: StockRow) {
     if (!(await confirm({ message: `刪除股票「${s.name}」？所有持股紀錄與歷史價格都會一併刪除。`, danger: true }))) return;
-    const r = await deleteStock(s.id);
-    if (r.ok) {
+    const r = await run(() => deleteStock(s.id));
+    if (r?.ok) {
       setStocks((arr) => arr.filter((x) => x.id !== s.id));
       showToast(true, '已刪除');
-    } else showToast(false, r.error?.message ?? '刪除失敗');
+    }
   }
 
   function handleScriptCellSave(round: number, stockId: string, type: ScriptChangeType, value: string) {
@@ -430,24 +432,21 @@ function StockModal({
   const [price, setPrice] = useState<string>(target?.current_price.toString() ?? '100');
   const [visible, setVisible] = useState(target?.is_visible ?? true);
   const [sellable, setSellable] = useState(target?.is_sellable ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: StockPayload = {
-        id: target?.id,
-        code: code.toUpperCase(),
-        name,
-        current_price: Number(price) || 0,
-        is_visible: visible,
-        is_sellable: sellable,
-      };
-      const r = await upsertStock(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: StockPayload = {
+      id: target?.id,
+      code: code.toUpperCase(),
+      name,
+      current_price: Number(price) || 0,
+      is_visible: visible,
+      is_sellable: sellable,
+    };
+    const r = await run(() => upsertStock(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (

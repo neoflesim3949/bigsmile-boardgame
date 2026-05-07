@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { ArrowLeft, ArrowRightLeft, Wallet, CheckCircle2, AlertCircle } from 'lucide-react';
 import {
   exchangeBlessing,
   listExchangeOptionsForPlayer,
   type ExchangeOptionViewPlayer,
 } from '@/app/actions/player';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   myMoney: number;
@@ -22,7 +23,7 @@ export default function ExchangeClient({ myMoney, isDead, gameEnabled, finalScor
   const [balance, setBalance] = useState(myMoney);
   const [selected, setSelected] = useState<string | null>(null);
   const [units, setUnits] = useState('1');
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const writeDisabled = isDead || !gameEnabled || !!finalScoringAt;
@@ -30,25 +31,21 @@ export default function ExchangeClient({ myMoney, isDead, gameEnabled, finalScor
   const n = Math.max(0, Math.floor(Number(units) || 0));
   const expectedMoney = cur ? n * cur.money_gain_per_unit : 0;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!cur) return;
     if (n <= 0 || n > cur.max_units) {
       setMsg({ ok: false, text: '兌換單位數不在可用範圍內' });
       return;
     }
-    busyTransition(async () => {
-      const r = await exchangeBlessing({ optionId: cur.id, units: n });
-      if (r.ok) {
-        setBalance(r.data!.new_balance.money);
-        setMsg({ ok: true, text: `已兌換 +${r.data!.money_gained.toLocaleString()} 金錢` });
-        // reload options（max_units 會更新）
-        const updated = await listExchangeOptionsForPlayer();
-        if (updated.ok) setOptions(updated.data!);
-        setUnits('1');
-      } else {
-        setMsg({ ok: false, text: r.error?.message ?? '兌換失敗' });
-      }
-    });
+    const r = await run(() => exchangeBlessing({ optionId: cur.id, units: n }));
+    if (r?.ok) {
+      setBalance(r.data!.new_balance.money);
+      setMsg({ ok: true, text: `已兌換 +${r.data!.money_gained.toLocaleString()} 金錢` });
+      // reload options（max_units 會更新）
+      const updated = await listExchangeOptionsForPlayer();
+      if (updated.ok) setOptions(updated.data!);
+      setUnits('1');
+    }
   }
 
   return (

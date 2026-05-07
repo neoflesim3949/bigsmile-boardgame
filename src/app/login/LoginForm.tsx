@@ -14,7 +14,7 @@ type LoginResult = ActionResult<{ role: Role; redirectTo: string }> | null;
  *
  * 規則：
  * - 重試 `INTERNAL_ERROR`（fail() 對未知 throw 的 fallback 包裝、含 pg EMAXCONN）
- * - 重試 `TIMEOUT`（db.ts 三道 timeout 保險絲被觸發、problem_0507.md §2/§4）
+ * - 重試 `TIMEOUT`（db.ts 三道 timeout 保險絲被觸發、0507_problem.md §2/§4）
  * - **不**重試 LOGIN_FAILED（密碼錯）/ LOGIN_LOCKED（鎖帳）/ INVALID_INPUT（form 錯）
  * - 最多 3 次 retry，base 500ms × 2^(attempt-1)，full jitter [0, 2 × base]
  *   - attempt 1: wait 0~1000ms

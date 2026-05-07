@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { addCompareComment, type CompareCommentRow } from '@/app/actions/compare';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   itemKey: string;
@@ -14,9 +15,9 @@ export default function CommentBox({ itemKey, initial }: Props) {
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [pending, start] = useTransition();
+  const { busy: pending, run } = useWriteGuard();
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     const trimmedName = name.trim();
@@ -25,20 +26,16 @@ export default function CommentBox({ itemKey, initial }: Props) {
       setErr('請填寫留言者與內容');
       return;
     }
-    start(async () => {
-      const r = await addCompareComment({
-        itemKey,
-        authorName: trimmedName,
-        content: trimmedContent,
-      });
-      if (!r.ok) {
-        setErr(r.error?.message ?? '送出失敗');
-        return;
-      }
-      if (r.data) setComments((prev) => [...prev, r.data!]);
+    const r = await run(() => addCompareComment({
+      itemKey,
+      authorName: trimmedName,
+      content: trimmedContent,
+    }));
+    if (r?.ok && r.data) {
+      setComments((prev) => [...prev, r.data!]);
       setName('');
       setContent('');
-    });
+    }
   }
 
   return (

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import {
   ArrowLeft, Building2, CheckCircle2, AlertCircle, Wallet,
   ArrowDownToLine, ArrowUpFromLine, FileText,
@@ -14,6 +14,7 @@ import {
   type BankLoanOptionViewPlayer,
   type ActiveLoanContract,
 } from '@/app/actions/player';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   myMoney: number;
@@ -39,7 +40,7 @@ export default function BankClient({
   const [units, setUnits] = useState('1');
   /** 還款 input：每筆合約一個輸入值（contractId → string） */
   const [repayInputs, setRepayInputs] = useState<Record<string, string>>({});
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const writeDisabled = isDead || tourMode || !gameEnabled || !!finalScoringAt;
@@ -55,50 +56,42 @@ export default function BankClient({
     if (lns.ok) setLoans(lns.data!);
   }
 
-  function handleBorrow() {
+  async function handleBorrow() {
     if (!cur) return;
     if (n <= 0 || n > cur.available_units) {
       setMsg({ ok: false, text: '單位數不在可借範圍' });
       return;
     }
-    busyTransition(async () => {
-      const r = await borrowFromBank({ optionId: cur.id, units: n });
-      if (r.ok) {
-        setMoney(r.data!.new_balance.money);
-        setLoan(r.data!.new_balance.bank_loan);
-        setMsg({ ok: true, text: `已借入 $${r.data!.borrowed_money.toLocaleString()}（合約已建立）` });
-        await refreshAll();
-        setUnits('1');
-      } else {
-        setMsg({ ok: false, text: r.error?.message ?? '借款失敗' });
-      }
-    });
+    const r = await run(() => borrowFromBank({ optionId: cur.id, units: n }));
+    if (r?.ok) {
+      setMoney(r.data!.new_balance.money);
+      setLoan(r.data!.new_balance.bank_loan);
+      setMsg({ ok: true, text: `已借入 $${r.data!.borrowed_money.toLocaleString()}（合約已建立）` });
+      await refreshAll();
+      setUnits('1');
+    }
   }
 
-  function handleRepayContract(c: ActiveLoanContract) {
+  async function handleRepayContract(c: ActiveLoanContract) {
     const raw = repayInputs[c.id];
     const amt = Number(raw);
     if (!Number.isFinite(amt) || amt <= 0) {
       setMsg({ ok: false, text: '請輸入有效還款金額' });
       return;
     }
-    busyTransition(async () => {
-      const r = await repayBank({ loanId: c.id, amount: amt });
-      if (r.ok) {
-        setMoney(r.data!.new_balance.money);
-        setLoan(r.data!.new_balance.bank_loan);
-        setRepayInputs((prev) => ({ ...prev, [c.id]: '' }));
-        setMsg({
-          ok: true,
-          text: r.data!.loan_paid_off
-            ? `合約「${c.loan_label}」已全額還清`
-            : `合約「${c.loan_label}」已還 $${r.data!.amount_repaid.toLocaleString()}，剩 $${r.data!.loan_balance_after.toLocaleString()}`,
-        });
-        await refreshAll();
-      } else {
-        setMsg({ ok: false, text: r.error?.message ?? '還款失敗' });
-      }
-    });
+    const r = await run(() => repayBank({ loanId: c.id, amount: amt }));
+    if (r?.ok) {
+      setMoney(r.data!.new_balance.money);
+      setLoan(r.data!.new_balance.bank_loan);
+      setRepayInputs((prev) => ({ ...prev, [c.id]: '' }));
+      setMsg({
+        ok: true,
+        text: r.data!.loan_paid_off
+          ? `合約「${c.loan_label}」已全額還清`
+          : `合約「${c.loan_label}」已還 $${r.data!.amount_repaid.toLocaleString()}，剩 $${r.data!.loan_balance_after.toLocaleString()}`,
+      });
+      await refreshAll();
+    }
   }
 
   return (

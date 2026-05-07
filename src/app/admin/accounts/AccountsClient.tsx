@@ -13,6 +13,7 @@ import {
 import { RotateCcw } from 'lucide-react';
 import type { Role } from '@/lib/auth';
 import { useConfirm } from '@/components/shared/ConfirmProvider';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 
 interface Props {
   initialRows: AccountRow[];
@@ -36,6 +37,7 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
   const [pendingSearch, startSearch] = useTransition();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
+  const { run } = useWriteGuard();
 
   function showToast(ok: boolean, msg: string) {
     setToast({ ok, msg });
@@ -151,9 +153,8 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
                         <button
                           onClick={async () => {
                             if (!(await confirm({ message: `重置玩家「${row.name}」的遊戲狀態？\n清空：四項參數、命格、持股、借貸、道具\n保留：帳號\n此操作不可復原。`, danger: true, confirmText: '執行重置' }))) return;
-                            const r = await resetSinglePlayer(row.user_id);
-                            if (r.ok) showToast(true, `已重置 ${row.name}`);
-                            else showToast(false, r.error?.message ?? '重置失敗');
+                            const r = await run(() => resetSinglePlayer(row.user_id));
+                            if (r?.ok) showToast(true, `已重置 ${row.name}`);
                           }}
                           className="p-1.5 text-zinc-400 hover:text-purple-400 hover:bg-purple-400/10 rounded transition-colors"
                           title="重置遊戲狀態（清空數值/持股/借貸/道具）"
@@ -171,12 +172,12 @@ export default function AccountsClient({ initialRows, initialTotal }: Props) {
                       <button
                         onClick={async () => {
                           if (!(await confirm({ message: `確定刪除帳號「${row.name}」？此操作不可復原。`, danger: true }))) return;
-                          const r = await deleteAccount(row.user_id);
-                          if (r.ok) {
+                          const r = await run(() => deleteAccount(row.user_id));
+                          if (r?.ok) {
                             setRows((arr) => arr.filter((x) => x.user_id !== row.user_id));
                             setTotal((n) => n - 1);
                             showToast(true, '已刪除');
-                          } else showToast(false, r.error?.message ?? '刪除失敗');
+                          }
                         }}
                         className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-rose-400/10 rounded transition-colors"
                         title="刪除"
@@ -248,33 +249,29 @@ function AccountModal({
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>(target?.role ?? 'player');
   const [is_active, setActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      if (isNew) {
-        if (!password) {
-          setErr('新增時必須設定密碼');
-          return;
-        }
-        const r = await createAccount({ user_id, name, login_id, password, role });
-        if (r.ok) onSaved(r.data!, true);
-        else setErr(r.error?.message ?? '建立失敗');
-      } else {
-        const r = await updateAccount({
-          user_id,
-          name,
-          login_id,
-          password: password || undefined,
-          role,
-          is_active,
-        });
-        if (r.ok) onSaved(r.data!, false);
-        else setErr(r.error?.message ?? '更新失敗');
+    if (isNew) {
+      if (!password) {
+        setErr('新增時必須設定密碼');
+        return;
       }
-    });
+      const r = await run(() => createAccount({ user_id, name, login_id, password, role }));
+      if (r?.ok) onSaved(r.data!, true);
+    } else {
+      const r = await run(() => updateAccount({
+        user_id,
+        name,
+        login_id,
+        password: password || undefined,
+        role,
+        is_active,
+      }));
+      if (r?.ok) onSaved(r.data!, false);
+    }
   }
 
   return (
@@ -347,20 +344,17 @@ function PasswordResetModal({
   target: AccountRow; onClose: () => void; onDone: () => void;
 }) {
   const [password, setPassword] = useState('');
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
     if (password.length < 8) {
       setErr('密碼至少 8 字元');
       return;
     }
-    busyTransition(async () => {
-      const r = await updateAccount({ user_id: target.user_id, password });
-      if (r.ok) onDone();
-      else setErr(r.error?.message ?? '更新失敗');
-    });
+    const r = await run(() => updateAccount({ user_id: target.user_id, password }));
+    if (r?.ok) onDone();
   }
 
   return (

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * 公開比對頁（無需登入）。
- * 對應 docs/different_NeoV2&BigsmileUnity.md，做成類 PDF 視覺。
+ * 對應 docs/0506_different_NeoV2_Unity.md，做成類 PDF 視覺。
  * middleware.ts PUBLIC_PATHS 已放行 /compare；ThemeProvider 強制深色。
  * 每個比對條目（1.1–4.10）尾端有公開留言區（CompareComment 表）。
  */

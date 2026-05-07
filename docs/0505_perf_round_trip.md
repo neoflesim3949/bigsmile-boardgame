@@ -1,7 +1,7 @@
 # 玩家熱路徑效能優化設計書 — 減少 PG round-trip
 
 > 撰寫日期：2026-05-05
-> 觸發來源：[testspeed_raw_0505.md](testspeed_raw_0505.md) Phase 1/2 p95 6.5s / 7.7s 偏高
+> 觸發來源：[0505_testspeed_raw.md](0505_testspeed_raw.md) Phase 1/2 p95 6.5s / 7.7s 偏高
 
 ## 問題陳述
 
@@ -212,7 +212,7 @@ return {
 
 ### 自動化（必跑）
 1. `npx tsc --noEmit -p tsconfig.json` — 型別檢查
-2. `npx tsx scripts/load-test.ts` — P1-P5 全測，比 testspeed_raw_0505.md 看 P1/P2 p95 改善幅度
+2. `npx tsx scripts/load-test.ts` — P1-P5 全測，比 0505_testspeed_raw.md 看 P1/P2 p95 改善幅度
 3. `npx tsx scripts/load-test-hot-path.ts` — 6 情境全測，看 buy 與 apply 是否有 regression
 
 ### 手動 smoke test（重要）
@@ -253,7 +253,7 @@ return {
 
 ## 實測結果（2026-05-05 完成）
 
-> 完整對照表另見 [testspeed_raw_0505_f.md](testspeed_raw_0505_f.md)。
+> 完整對照表另見 [0505_testspeed_raw_f.md](0505_testspeed_raw_f.md)。
 
 ### TL;DR
 
@@ -361,7 +361,7 @@ P2 avg 改善 **-22% / 932ms** 最有感；其他指標也有明確進步。**0 
 
 ### 對現實活動的影響
 
-依 [testspeed_0505_s.md](testspeed_0505_s.md) 的 spaced 測試結論，現實活動到達速率為 600ms / 14400ms 間隔（不是 25ms 同步壓測）。在這些情境下：
+依 [0505_testspeed_s.md](0505_testspeed_s.md) 的 spaced 測試結論，現實活動到達速率為 600ms / 14400ms 間隔（不是 25ms 同步壓測）。在這些情境下：
 - 單請求 round-trip 從 9 → 5 = 直接救 ~80ms（4 × 20ms）
 - 玩家視角：buyStock 在 600ms 間隔下從 baseline ~310ms 預期降到 ~230ms，達 §12 < 300ms 規格
 
@@ -383,5 +383,5 @@ P2 avg 改善 **-22% / 932ms** 最有感；其他指標也有明確進步。**0 
 - ✅ [CLAUDE.md §11 資料庫紅旗清單](../CLAUDE.md#資料庫)（新增 3 條檢查項）
 - ✅ [ARCH §14.5](BOARD_GAME_V2_ARCHITECTURE.md#145-連線池與-serverless)（新增 tx 內傳 client 規則）
 - ✅ [ARCH §14.9 模式 D](BOARD_GAME_V2_ARCHITECTURE.md#149-防止-n1-查詢)（新增「合併 CTE」段落）
-- ✅ docs/perf_round_trip_0505.md（本檔，含設計 + 實測數據）
-- ✅ [docs/testspeed_raw_0505_f.md](testspeed_raw_0505_f.md)（前後對照詳細表）
+- ✅ docs/0505_perf_round_trip.md（本檔，含設計 + 實測數據）
+- ✅ [docs/0505_testspeed_raw_f.md](0505_testspeed_raw_f.md)（前後對照詳細表）

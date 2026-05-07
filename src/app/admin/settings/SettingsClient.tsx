@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 import { Settings, Save, Plus, Edit2, Trash2, Info, AlertTriangle, X, CheckCircle2 } from 'lucide-react';
 import {
   updateAppSettings,
@@ -55,7 +56,7 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
   const [activeAction, setActiveAction] = useState<DangerActionInfo | null>(null);
   const [editing, setEditing] = useState<TemplateRow | null>(null);
   const [editingBand, setEditingBand] = useState<KarmaBandRow | null>(null);
-  const [savingSettings, savingSettingsTransition] = useTransition();
+  const { busy: savingSettings, run } = useWriteGuard();
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const confirm = useConfirm();
 
@@ -68,13 +69,10 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
     setSettings((s) => ({ ...s, [key]: value }));
   }
 
-  function handleSaveSettings() {
-    savingSettingsTransition(async () => {
-      const payload: SettingsPayload = settings as SettingsPayload;
-      const r = await updateAppSettings(payload);
-      if (r.ok) showToast(true, `已更新 ${r.data!.updated} 項設定`);
-      else showToast(false, `儲存失敗：${r.error?.message ?? ''}`);
-    });
+  async function handleSaveSettings() {
+    const payload: SettingsPayload = settings as SettingsPayload;
+    const r = await run(() => updateAppSettings(payload));
+    if (r?.ok) showToast(true, `已更新 ${r.data!.updated} 項設定`);
   }
 
   return (
@@ -178,19 +176,19 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
                 t={t}
                 maxDraws={Number(settings.MaxDestinyDraws) || 100}
                 onToggle={async (active) => {
-                  const r = await upsertTemplate({ ...t, is_active: active });
-                  if (r.ok) {
+                  const r = await run(() => upsertTemplate({ ...t, is_active: active }));
+                  if (r?.ok) {
                     setTemplates((arr) => arr.map((x) => x.id === t.id ? r.data! : x));
-                  } else showToast(false, r.error?.message ?? '');
+                  }
                 }}
                 onEdit={() => setEditing(t)}
                 onDelete={async () => {
                   if (!(await confirm({ message: `確定刪除命格「${t.label}」？`, danger: true }))) return;
-                  const r = await deleteTemplate(t.id);
-                  if (r.ok) {
+                  const r = await run(() => deleteTemplate(t.id));
+                  if (r?.ok) {
                     setTemplates((arr) => arr.filter((x) => x.id !== t.id));
                     showToast(true, '已刪除');
-                  } else showToast(false, r.error?.message ?? '刪除失敗');
+                  }
                 }}
               />
             ))}
@@ -243,9 +241,8 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
                           type="checkbox"
                           checked={b.is_active}
                           onChange={async (e) => {
-                            const r = await upsertKarmaBand({ ...b, is_active: e.target.checked });
-                            if (r.ok) setBands((arr) => arr.map((x) => x.id === b.id ? r.data! : x));
-                            else showToast(false, r.error?.message ?? '');
+                            const r = await run(() => upsertKarmaBand({ ...b, is_active: e.target.checked }));
+                            if (r?.ok) setBands((arr) => arr.map((x) => x.id === b.id ? r.data! : x));
                           }}
                           className="sr-only peer"
                         />
@@ -259,11 +256,11 @@ export default function SettingsClient({ initialSettings, initialTemplates, init
                       <button
                         onClick={async () => {
                           if (!(await confirm({ message: `確定刪除業力區段「${b.label}」？`, danger: true }))) return;
-                          const r = await deleteKarmaBand(b.id);
-                          if (r.ok) {
+                          const r = await run(() => deleteKarmaBand(b.id));
+                          if (r?.ok) {
                             setBands((arr) => arr.filter((x) => x.id !== b.id));
                             showToast(true, '已刪除');
-                          } else showToast(false, r.error?.message ?? '刪除失敗');
+                          }
                         }}
                         className="p-1.5 text-zinc-400 hover:text-rose-400"
                       >
@@ -557,29 +554,26 @@ function TemplateModal({
   template: TemplateRow; onClose: () => void; onSaved: (t: TemplateRow) => void;
 }) {
   const [draft, setDraft] = useState<TemplateRow>(template);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const r = await upsertTemplate({
-        id: draft.id || undefined,
-        label: draft.label,
-        emoji: draft.emoji,
-        description: draft.description,
-        theme: draft.theme as Theme,
-        rarity_label: draft.rarity_label,
-        money: Number(draft.money),
-        health: Number(draft.health),
-        blessing: Number(draft.blessing),
-        karma: Number(draft.karma),
-        is_active: draft.is_active,
-        draw_ratio: Number(draft.draw_ratio) || 0,
-      });
-      if (r.ok) onSaved(r.data!);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const r = await run(() => upsertTemplate({
+      id: draft.id || undefined,
+      label: draft.label,
+      emoji: draft.emoji,
+      description: draft.description,
+      theme: draft.theme as Theme,
+      rarity_label: draft.rarity_label,
+      money: Number(draft.money),
+      health: Number(draft.health),
+      blessing: Number(draft.blessing),
+      karma: Number(draft.karma),
+      is_active: draft.is_active,
+      draw_ratio: Number(draft.draw_ratio) || 0,
+    }));
+    if (r?.ok) onSaved(r.data!);
   }
 
   return (
@@ -697,7 +691,7 @@ function KarmaBandModal({
   band: KarmaBandRow; onClose: () => void; onSaved: (b: KarmaBandRow) => void;
 }) {
   const [draft, setDraft] = useState<KarmaBandRow>(band);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
   function setNum(key: 'money_delta' | 'health_delta' | 'blessing_delta' | 'karma_delta' | 'sort_order', v: string) {
@@ -714,25 +708,22 @@ function KarmaBandModal({
     setDraft({ ...draft, [key]: Number.isFinite(n) ? Math.trunc(n) : null });
   }
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const r = await upsertKarmaBand({
-        id: draft.id || undefined,
-        label: draft.label,
-        karma_min: draft.karma_min,
-        karma_max: draft.karma_max,
-        money_delta: draft.money_delta,
-        health_delta: draft.health_delta,
-        blessing_delta: draft.blessing_delta,
-        karma_delta: draft.karma_delta,
-        theme: draft.theme,
-        sort_order: draft.sort_order,
-        is_active: draft.is_active,
-      });
-      if (r.ok) onSaved(r.data!);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const r = await run(() => upsertKarmaBand({
+      id: draft.id || undefined,
+      label: draft.label,
+      karma_min: draft.karma_min,
+      karma_max: draft.karma_max,
+      money_delta: draft.money_delta,
+      health_delta: draft.health_delta,
+      blessing_delta: draft.blessing_delta,
+      karma_delta: draft.karma_delta,
+      theme: draft.theme,
+      sort_order: draft.sort_order,
+      is_active: draft.is_active,
+    }));
+    if (r?.ok) onSaved(r.data!);
   }
 
   return (
@@ -899,25 +890,23 @@ function ConfirmModal({
   info: DangerActionInfo; onClose: () => void; onConfirmed: () => void;
 }) {
   const [step, setStep] = useState(0);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (step < 2) {
       setStep((s) => s + 1);
       return;
     }
-    busyTransition(async () => {
-      const r = await performDangerOp(info.op);
-      if (r.ok) {
-        setDone(true);
-        onConfirmed();
-        setTimeout(onClose, 1200);
-      } else {
-        setErr(r.error?.message ?? '執行失敗');
-      }
-    });
+    const r = await run(() => performDangerOp(info.op));
+    if (r?.ok) {
+      setDone(true);
+      onConfirmed();
+      setTimeout(onClose, 1200);
+    } else if (r) {
+      setErr(r.error?.message ?? '執行失敗');
+    }
   }
 
   return (

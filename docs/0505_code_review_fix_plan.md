@@ -1,7 +1,7 @@
-# Code Review 修正計畫 — 整合 skill_code_review.md / skill_code_review_0504.md
+# Code Review 修正計畫 — 整合 skill_code_review.md / 0504_skill_code_review.md
 
 > 撰寫日期：2026-05-05
-> 來源：[skill_code_review.md](skill_code_review.md)（2026-05-02、19 條） + [skill_code_review_0504.md](skill_code_review_0504.md)（2026-05-04、13 條）
+> 來源：[skill_code_review.md](skill_code_review.md)（2026-05-02、19 條） + [0504_skill_code_review.md](0504_skill_code_review.md)（2026-05-04、13 條）
 > 目的：把兩份報告的剩餘項統整、去重、按 bundle 編組、估時、列執行順序
 
 ## 摘要
@@ -9,12 +9,12 @@
 | 來源 | 原列項 | 已修 | 仍存在 / 須驗證 |
 |------|-------|------|-------------------|
 | skill_code_review.md | 19（3 Critical + 13 P2 + 6 P3 - **3 已修**） | 3（drawDestiny / applyQuickAction guards / exchangeBlessing 訊息）| **16** |
-| skill_code_review_0504.md | 13（2 High + 4 Medium + 7 Low） | 0 | **13** |
+| 0504_skill_code_review.md | 13（2 High + 4 Medium + 7 Low） | 0 | **13** |
 | **合計** | 32 | 3 | **29** |
 
 **同主題去重後實際工作量約 25-27 項**（部分跨兩份重疊）。
 
-## 跟近期 round-trip 優化（[perf_round_trip_0505.md](perf_round_trip_0505.md)）的關係
+## 跟近期 round-trip 優化（[0505_perf_round_trip.md](0505_perf_round_trip.md)）的關係
 
 - ✅ **#3.5 `setSetting` audit log**：與重構後 `setSetting` 的 client 版本可順手一起加（refactor #1 在 lib/settings 加了 client 參數，setSetting 同款 add）
 - ⚠️ **#3.2 `assertNotTourMode` 改用 `getSetting`**：`assertNotFrozen` 已合併兩個 assert，**這條建議被新設計取代**，但 `assertNotFrozen` 內部仍直接 SQL 查 AppSettings + BoardConfig（為了 1 round-trip 合併）。**標記為「已被新設計覆蓋，不修」**
@@ -46,7 +46,7 @@
 | 4.5 | `getAdminDashboard` 兩次 settings | 🟢 P3 | 與 perf opt 同模式可順手 |
 | 4.6 | admin button 缺 disabled | 🟢 P3 | 可延後 |
 
-### 來自 [skill_code_review_0504.md](skill_code_review_0504.md)
+### 來自 [0504_skill_code_review.md](0504_skill_code_review.md)
 
 | ID | 內容 | 嚴重度 | 狀態 |
 |----|------|-------|------|

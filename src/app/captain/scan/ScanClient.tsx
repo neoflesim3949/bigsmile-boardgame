@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState, useTransition, useEffect } from 'react';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 import QrScannerModal from '@/components/QrScannerModal';
 import {
   ArrowLeft, QrCode, X, ListChecks, Skull, Sparkles,
@@ -96,7 +97,10 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
   }, [inProgress, captainUserId, hydrated]);
   const [scanErr, setScanErr] = useState<string | null>(null);
   const [manualId, setManualId] = useState('');
-  const [busy, busyTransition] = useTransition();
+  // 讀路徑（lookup / verify QR）保留 useTransition；寫路徑（apply / rebirth）走 WriteGuard
+  const [readPending, busyTransition] = useTransition();
+  const { busy: writePending, run } = useWriteGuard();
+  const busy = readPending || writePending;
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
 
   function showToast(ok: boolean, msg: string) {
@@ -238,22 +242,18 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
     });
   }
 
-  function performSettle(item: InProgressItem) {
-    busyTransition(async () => {
-      const r = await applyQuickAction({
-        quickActionId: item.quickAction.id,
-        targetUserId: item.player.user_id,
-      });
-      if (r.ok) {
-        const dm = r.data!;
-        const itemMsg = dm.granted_item_id ? '（含發放道具）' : '';
-        showToast(true, `${item.player.name}：金錢${fmt(dm.delta_money)} 健康${fmt(dm.delta_health)} 福分${fmt(dm.delta_blessing)} 業力${fmt(dm.delta_karma)}${itemMsg}`);
-        setInProgress((arr) => arr.filter((x) => x.key !== item.key));
-      } else {
-        showToast(false, r.error?.message ?? '結算失敗');
-      }
-      setConfirmSettle(null);
-    });
+  async function performSettle(item: InProgressItem) {
+    const r = await run(() => applyQuickAction({
+      quickActionId: item.quickAction.id,
+      targetUserId: item.player.user_id,
+    }));
+    if (r?.ok) {
+      const dm = r.data!;
+      const itemMsg = dm.granted_item_id ? '（含發放道具）' : '';
+      showToast(true, `${item.player.name}：金錢${fmt(dm.delta_money)} 健康${fmt(dm.delta_health)} 福分${fmt(dm.delta_blessing)} 業力${fmt(dm.delta_karma)}${itemMsg}`);
+      setInProgress((arr) => arr.filter((x) => x.key !== item.key));
+    }
+    setConfirmSettle(null);
   }
 
   async function handleRebirth() {
@@ -263,15 +263,11 @@ export default function ScanClient({ captainUserId, stations, allQuickActions, a
       danger: true,
       confirmText: '執行重生',
     }))) return;
-    busyTransition(async () => {
-      const r = await rebirthPlayer({ qrToken: scanned.qrToken!, stationId });
-      if (r.ok) {
-        showToast(true, `已重生 ${scanned.player.name}（清 ${r.data!.cleared.stocks} 股、${r.data!.cleared.loans} 筆借貸、${r.data!.cleared.items} 個道具）`);
-        setScanned(null);
-      } else {
-        showToast(false, r.error?.message ?? '重生失敗');
-      }
-    });
+    const r = await run(() => rebirthPlayer({ qrToken: scanned.qrToken!, stationId }));
+    if (r?.ok) {
+      showToast(true, `已重生 ${scanned.player.name}（清 ${r.data!.cleared.stocks} 股、${r.data!.cleared.loans} 筆借貸、${r.data!.cleared.items} 個道具）`);
+      setScanned(null);
+    }
   }
 
   return (
@@ -759,7 +755,7 @@ function SellWithMultiplierModal({
 
   const [shares, setShares] = useState(holding.shares.toString());
   const [multId, setMultId] = useState<string>(firstEligible?.id ?? '');
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -774,7 +770,7 @@ function SellWithMultiplierModal({
   const blessingPenalty = profit > 0 ? Math.round((profit * blessingMult) / blessingDivisor) : 0;
   const selectedUnmet = mult ? unmetItemNames(mult.req_item_ids) : [];
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!mult) {
       setErr('請選擇倍率方案');
       return;
@@ -784,21 +780,18 @@ function SellWithMultiplierModal({
       return;
     }
     setErr(null);
-    busyTransition(async () => {
-      const r = await captainSellStockWithMultiplier({
-        stationId,
-        targetUserId,
-        stockId: holding.stock_id,
-        shares: sharesNum,
-        multiplierId: mult.id,
-      });
-      if (r.ok) {
-        await onSold(`已代售 ${holding.code} ×${sharesNum}：+$${r.data!.total_money_gain.toLocaleString()}${blessingPenalty > 0 ? ` / 福分 -${blessingPenalty}` : ''}`);
-      } else {
-        setErr(r.error?.message ?? '賣出失敗');
-        setConfirming(false);
-      }
-    });
+    const r = await run(() => captainSellStockWithMultiplier({
+      stationId,
+      targetUserId,
+      stockId: holding.stock_id,
+      shares: sharesNum,
+      multiplierId: mult.id,
+    }));
+    if (r?.ok) {
+      await onSold(`已代售 ${holding.code} ×${sharesNum}：+$${r.data!.total_money_gain.toLocaleString()}${blessingPenalty > 0 ? ` / 福分 -${blessingPenalty}` : ''}`);
+    } else {
+      setConfirming(false);
+    }
   }
 
   return (

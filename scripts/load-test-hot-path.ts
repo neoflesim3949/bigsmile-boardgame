@@ -14,7 +14,7 @@
  *   E. 250 apply + 125 buy + 125 sell（三向混合，仍單一 QA）
  *   F. 寫實尖峰：10 關主 × 5 站 × 25 QA + 250 apply + 125 buy + 125 sell（多 QA 分散）
  *
- * 報告：docs/testspeed_0505.md（每次跑覆寫）
+ * 報告：docs/0505_testspeed.md（每次跑覆寫）
  */
 
 import { config as loadEnv } from 'dotenv';
@@ -847,7 +847,7 @@ async function main() {
     }));
 
     const md = renderReport(results, isPgBouncer);
-    const dest = join(process.cwd(), 'docs', 'testspeed_0505.md');
+    const dest = join(process.cwd(), 'docs', '0505_testspeed.md');
     writeFileSync(dest, md, 'utf-8');
     console.log(`\n📝 報告已寫入：${dest}`);
   } finally {
@@ -875,7 +875,7 @@ function renderReport(results: ScenarioResult[], isPgBouncer: boolean): string {
   md.push('');
   md.push(`## 為什麼測這 ${results.length} 個情境？`);
   md.push('');
-  md.push(`先前測試（[testspeed_0504_1.md](testspeed_0504_1.md)）發現 Phase 1/3/4/5 都是 **admin 端 / 自動運算**（一場活動只跑一次或十幾次），實際**熱路徑**是三件事：`);
+  md.push(`先前測試（[0504_testspeed_1.md](0504_testspeed_1.md)）發現 Phase 1/3/4/5 都是 **admin 端 / 自動運算**（一場活動只跑一次或十幾次），實際**熱路徑**是三件事：`);
   md.push('');
   md.push(`- **玩家買股**（\`buyStock\`）— 玩家自發、頻繁、隨機分散`);
   md.push(`- **玩家賣股**（\`sellStock\`）— 含 \`profit > 0\` 時的 blessing_penalty 計算`);

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import ThemeProvider from '@/components/ThemeProvider';
+import { WriteGuardProvider } from '@/components/shared/WriteGuard';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -19,7 +20,7 @@ export default function RootLayout({
     <html lang="zh-TW" data-theme="dark">
       <body className={`${inter.className} font-sans antialiased min-h-screen selection:bg-amber-500/30 selection:text-amber-200`}>
         <ThemeProvider />
-        {children}
+        <WriteGuardProvider>{children}</WriteGuardProvider>
       </body>
     </html>
   );

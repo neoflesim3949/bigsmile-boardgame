@@ -1,7 +1,7 @@
 /**
  * 間隔到達速率壓測 — 同 6 個情境（A/B/C/D/E/F）× 3 種到達間隔（25ms / 600ms / 14400ms）
  *
- * 對照 testspeed_0505.md（同步發送＝零間隔）。本檔目的：證明「現實到達速率下 p95 接近單人 baseline」。
+ * 對照 0505_testspeed.md（同步發送＝零間隔）。本檔目的：證明「現實到達速率下 p95 接近單人 baseline」。
  *
  * 三個間隔的解讀：
  *  - 25ms（40 ops/s）— 仍高於 B/C 服務速率 60，但接近邊界，能看「快接近飽和」的反應
@@ -13,7 +13,7 @@
  *  - 600ms × N=100 → 60s
  *  - 14400ms × N=15 → 216s（≈ 3.6 min）
  *
- * 報告：docs/testspeed_0505_s.md（每次跑覆寫）
+ * 報告：docs/0505_testspeed_s.md（每次跑覆寫）
  */
 
 import { config as loadEnv } from 'dotenv';
@@ -243,8 +243,8 @@ async function main() {
     const md = renderReport(results, isPgBouncer);
     // 跑單一 interval 時寫到 `_<label>` 後綴檔，免覆蓋 18-combo baseline
     const filename = intervalArg
-      ? `testspeed_0505_s_${intervalArg}.md`
-      : 'testspeed_0505_s.md';
+      ? `0505_testspeed_s_${intervalArg}.md`
+      : '0505_testspeed_s.md';
     const dest = join(process.cwd(), 'docs', filename);
     writeFileSync(dest, md, 'utf-8');
     console.log(`\n📝 報告已寫入：${dest}`);
@@ -263,7 +263,7 @@ function renderReport(results: SpacedResult[], isPgBouncer: boolean): string {
   md.push('');
   md.push(`## 為什麼測這 18 個組合？`);
   md.push('');
-  md.push(`對照 [testspeed_0505.md](testspeed_0505.md) 是「同一毫秒打 500 發」的同步壓測 — 那是「壓 row lock 上限」的人造極端。本檔測**間隔到達率**，目的：`);
+  md.push(`對照 [0505_testspeed.md](0505_testspeed.md) 是「同一毫秒打 500 發」的同步壓測 — 那是「壓 row lock 上限」的人造極端。本檔測**間隔到達率**，目的：`);
   md.push('');
   md.push(`- 驗證「到達速率 < 服務速率」時 p95 趨近單人 baseline`);
   md.push(`- 找出 6 情境各自的「飽和點」(saturation knee)`);
@@ -302,7 +302,7 @@ function renderReport(results: SpacedResult[], isPgBouncer: boolean): string {
   md.push(`| 600ms | 100 | 59.4 秒 | 開幕 5 分鐘 500 人陸續抽卡 |`);
   md.push(`| 14400ms | 15 | 201.6 秒（≈ 3.4 分鐘）| 整場 2 小時 500 玩家平均到達率 |`);
   md.push('');
-  md.push(`### 跟 [testspeed_0505.md](testspeed_0505.md) 同步壓測的差別`);
+  md.push(`### 跟 [0505_testspeed.md](0505_testspeed.md) 同步壓測的差別`);
   md.push('');
   md.push(`同步壓測：500 個請求**同一毫秒內**全部 \`Promise.all()\` 送出 — JS event loop 內 sub-ms 排隊，pool 50 拿到，剩 450 個瞬間佇列爆滿。這是「壓 row lock 上限」的人造極端，現場永遠不會發生。`);
   md.push('');
@@ -423,7 +423,7 @@ function renderReport(results: SpacedResult[], isPgBouncer: boolean): string {
   md.push(`- 整場 2 小時 500 玩家平均到達率對應 **14400ms 間隔**：本次測得 p95 反映**真實玩家體感**`);
   md.push(`- 開幕 5 分鐘內 500 人陸續抽卡（600ms 間隔）：本次 600ms 結果是預期延遲`);
   md.push(`- 開盤秒殺極端尖峰（25ms 間隔，500 人 5 秒內下單）：偶發但需要承受得住，本次 25ms 結果反映尖峰`);
-  md.push(`- **同步壓測 [testspeed_0505.md](testspeed_0505.md) 的 100s+ p95 是「同一毫秒打 500 發」這種絕對不會發生的人造極限**，現場系統不會觀測到那種延遲`);
+  md.push(`- **同步壓測 [0505_testspeed.md](0505_testspeed.md) 的 100s+ p95 是「同一毫秒打 500 發」這種絕對不會發生的人造極限**，現場系統不會觀測到那種延遲`);
   md.push('');
 
   return md.join('\n') + '\n';

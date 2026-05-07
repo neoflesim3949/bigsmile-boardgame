@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
+import { useWriteGuard } from '@/components/shared/WriteGuard';
 import {
   MonitorPlay, Plus, Clock, Key, Copy, Trash2, X, Edit2, ExternalLink,
   AlertCircle, CheckCircle2,
@@ -32,8 +33,9 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
   const [board, setBoard] = useState<BoardConfigRow | null>(initialBoard);
   const [tokens, setTokens] = useState<DisplayTokenRow[]>(initialTokens);
   const [editingEvent, setEditingEvent] = useState<EventRow | 'new' | null>(null);
-  const [boardBusy, boardBusyTransition] = useTransition();
-  const [tokenBusy, tokenBusyTransition] = useTransition();
+  const { busy: writeBusy, run } = useWriteGuard();
+  const boardBusy = writeBusy;
+  const tokenBusy = writeBusy;
   const [tokenLabel, setTokenLabel] = useState('主舞台大電視');
   const [tokenDays, setTokenDays] = useState('3');
   const [justIssued, setJustIssued] = useState<{ token: string; jti: string } | null>(null);
@@ -45,55 +47,51 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
     setTimeout(() => setToast(null), 2500);
   }
 
-  function handleSaveBoard() {
+  async function handleSaveBoard() {
     if (!board) return;
     // 儲存前過濾掉已不存在的股票 ID（被刪除的商品殘留），避免 DB 累積無效 reference
     const validStockIds = new Set(stocks.map((s) => s.id));
     const cleanFeatured = board.featured_stock_ids.filter((id) => validStockIds.has(id));
-    boardBusyTransition(async () => {
-      const r = await updateBoardConfig({
-        title: board.title,
-        featured_stock_ids: cleanFeatured,
-        color_scheme: board.color_scheme,
-        event_rotate_seconds: board.event_rotate_seconds,
-      });
-      if (r.ok) {
-        setBoard(r.data!);
-        showToast(true, '已儲存看板設定');
-      } else showToast(false, r.error?.message ?? '');
-    });
+    const r = await run(() => updateBoardConfig({
+      title: board.title,
+      featured_stock_ids: cleanFeatured,
+      color_scheme: board.color_scheme,
+      event_rotate_seconds: board.event_rotate_seconds,
+    }));
+    if (r?.ok) {
+      setBoard(r.data!);
+      showToast(true, '已儲存看板設定');
+    }
   }
 
-  function handleIssueToken() {
-    tokenBusyTransition(async () => {
-      const r = await issueDisplayToken(tokenLabel, Number(tokenDays) || 3);
-      if (r.ok) {
-        setJustIssued({ token: r.data!.token, jti: r.data!.jti });
-        setTokens((arr) => [
-          { jti: r.data!.jti, label: tokenLabel, expires_at: r.data!.expires_at, revoked_at: null, created_at: new Date().toISOString() },
-          ...arr,
-        ]);
-        showToast(true, '已發行 token');
-      } else showToast(false, r.error?.message ?? '');
-    });
+  async function handleIssueToken() {
+    const r = await run(() => issueDisplayToken(tokenLabel, Number(tokenDays) || 3));
+    if (r?.ok) {
+      setJustIssued({ token: r.data!.token, jti: r.data!.jti });
+      setTokens((arr) => [
+        { jti: r.data!.jti, label: tokenLabel, expires_at: r.data!.expires_at, revoked_at: null, created_at: new Date().toISOString() },
+        ...arr,
+      ]);
+      showToast(true, '已發行 token');
+    }
   }
 
   async function handleRevokeToken(jti: string) {
     if (!(await confirm({ message: '撤銷此 token？對應的看板畫面將立即失效。', danger: true }))) return;
-    const r = await revokeDisplayToken(jti);
-    if (r.ok) {
+    const r = await run(() => revokeDisplayToken(jti));
+    if (r?.ok) {
       setTokens((arr) => arr.map((t) => t.jti === jti ? { ...t, revoked_at: new Date().toISOString() } : t));
       showToast(true, '已撤銷');
-    } else showToast(false, r.error?.message ?? '');
+    }
   }
 
   async function handleDeleteToken(jti: string) {
     if (!(await confirm({ message: '刪除此 token 紀錄？此操作無法復原。', danger: true }))) return;
-    const r = await deleteDisplayToken(jti);
-    if (r.ok) {
+    const r = await run(() => deleteDisplayToken(jti));
+    if (r?.ok) {
       setTokens((arr) => arr.filter((t) => t.jti !== jti));
       showToast(true, '已刪除');
-    } else showToast(false, r.error?.message ?? '');
+    }
   }
 
   function toggleFeatured(stockId: string) {
@@ -173,11 +171,11 @@ export default function EventsClient({ initialEvents, initialBoard, stocks, init
                         <button
                           onClick={async () => {
                             if (!(await confirm({ message: `刪除事件「${e.title}」？`, danger: true }))) return;
-                            const r = await deleteEvent(e.id);
-                            if (r.ok) {
+                            const r = await run(() => deleteEvent(e.id));
+                            if (r?.ok) {
                               setEvents((arr) => arr.filter((x) => x.id !== e.id));
                               showToast(true, '已刪除');
-                            } else showToast(false, r.error?.message ?? '');
+                            }
                           }}
                           className="p-1.5 text-zinc-400 hover:text-rose-400"
                         >
@@ -445,25 +443,22 @@ function EventModal({
   const [endAt, setEndAt] = useState(toLocalInput(target?.end_at ?? null));
   const [priority, setPriority] = useState<string>(target?.priority.toString() ?? '0');
   const [active, setActive] = useState(target?.is_active ?? true);
-  const [busy, busyTransition] = useTransition();
+  const { busy, run } = useWriteGuard();
   const [err, setErr] = useState<string | null>(null);
 
-  function handleSave() {
+  async function handleSave() {
     setErr(null);
-    busyTransition(async () => {
-      const payload: EventPayload = {
-        id: target?.id,
-        title,
-        text,
-        start_at: fromLocalInput(startAt),
-        end_at: fromLocalInput(endAt),
-        priority: Number(priority) || 0,
-        is_active: active,
-      };
-      const r = await upsertEvent(payload);
-      if (r.ok) onSaved(r.data!, isNew);
-      else setErr(r.error?.message ?? '儲存失敗');
-    });
+    const payload: EventPayload = {
+      id: target?.id,
+      title,
+      text,
+      start_at: fromLocalInput(startAt),
+      end_at: fromLocalInput(endAt),
+      priority: Number(priority) || 0,
+      is_active: active,
+    };
+    const r = await run(() => upsertEvent(payload));
+    if (r?.ok) onSaved(r.data!, isNew);
   }
 
   return (
